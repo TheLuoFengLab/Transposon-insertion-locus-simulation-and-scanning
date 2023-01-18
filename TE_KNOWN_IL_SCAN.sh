@@ -1,11 +1,11 @@
 #!/bin/bash
 SAMP=$1
-TE=$2
+IL=$2
 NAME=$3
-LEFT=$( awk -F '[:-]' '{print $2}' <<< "${TE}" )
-RIGHT=$( awk -F '[:-]' '{print $3}' <<< "${TE}" )
+LEFT=$( awk -F '[:-]' '{print $2}' <<< "${IL}" )
+RIGHT=$( awk -F '[:-]' '{print $3}' <<< "${IL}" )
 samtools index ${SAMP}.TE_masked.srt.bam
-samtools view -q 1 -h ${SAMP}.TE_masked.srt.bam ${TE} | awk -v x=${LEFT} -v y=${RIGHT} '
+samtools view -q 1 -h ${SAMP}.TE_masked.srt.bam ${IL} | awk -v x=${LEFT} -v y=${RIGHT} '
 $17~/SA:Z:/ && ($4<x+150 || $4>y-150) { match($17,/SA:Z:([^,]*),([^,]*),([+-]),([^,]*),([^,]*),/,a);
 if ($17~/,[0-9]+S[0-9]+M,/ && a[5]>0) {print a[1]"\t"a[2]-5"\t"a[2]+5"\t"$1};
 if ($17~/,[0-9]+M[0-9]+S,/ && a[5]>0) {match($17,/,([0-9]+)M/,b); print a[1]"\t"a[2]+b[1]-5"\t"a[2]+b[1]+5"\t"$1};
