@@ -70,7 +70,7 @@ done
 paste ALL10.INS.merged.bed TEMP.INS >> ALL10.INS.tsv
 # Iterates over ALL10.*.INDEL.bed files, extracts the 4th field, and merges it into a temporary file
 
-### Step 5: 
+### Step 5: Clustering of INDEL sequences to identify putatively active SWO transposable element families
 bedtools getfasta -fi CK2021.60.corrected.fasta -bed ALL10.DEL.filtered_overlaps.bed -fo ALL10.DEL.filtered_overlaps.fasta
 # Extracting FASTA Sequences of DELs
 awk '$4-$3<=10 && $5==1 && $11-$10>=50' *.var.txt | sort -u -k1,3 | awk '{print ">"$2":"$3"-"$4"\t"$8}' | sed "s/\t/\n/g" > ALL10.INS.merged.fasta
