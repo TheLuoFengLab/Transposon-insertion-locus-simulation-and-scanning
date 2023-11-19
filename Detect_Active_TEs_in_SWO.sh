@@ -26,14 +26,8 @@ for VAR in *.fasta.var.txt ; do
 done
 
 cat *.INS.bed | bedtools sort -i - > merged.temp.INS.bed
-bedtools intersect -a merged.temp.INS.bed -b merged.temp.INS.bed -wao > merged.temp.INS.overlaps.bed
-awk 'BEGIN {OFS="\t"} ($2<$5) || ($2==$5 && $3<$6) { 
-     lenA = $3 - $2;
-     lenB = $6 - $5;
-     overlap = $NF;
-     if (overlap/lenA >= 0.95 && overlap/lenB >= 0.95) {
-         print $1, $2, $3
-     }
+bedtools intersect -wo -f 0.95 -r -a merged.temp.INS.bed -b merged.temp.INS.bed | awk '$2!=$5 || $3!=$6 {print $1"\t"$2"\t"}' > merged.temp.INS.overlaps.bed
+awk '
 }' merged.temp.INS.overlaps.bed > merged.temp.INS.filtered_overlaps.bed
 # Concatenate INS from all assemblies and remove duplications with reciprocal 95% overlap
 
