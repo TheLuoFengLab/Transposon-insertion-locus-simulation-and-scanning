@@ -46,22 +46,41 @@ cat *.INS.bed | bedtools sort -i - | bedtools merge -d 10 -i - > ALL10.INS.merge
 ### Step 3: 'for' loop - Intersection analysis with bedtools:
 for BED in Csiv4.DEL.bed T78.asem.DEL.bed SF.asem.DEL.bed GCA_019144245.1.DEL.bed GCA_019144225.1.DEL.bed GCA_019144195.1.DEL.bed GCA_019144185.1.DEL.bed GCA_019144155.1.DEL.bed GCA_019143665.1.DEL.bed GCA_018104345.1.DEL.bed; do
   bedtools intersect -f 0.9 -F 0.9 -c -a ALL10.DEL.filtered_overlaps.bed -b $BED > TEMP.${BED}
-  # Uses bedtools intersect to find overlaps between the ALL10.INDEL.bed file and each BED file
+  # Uses bedtools intersect to find overlaps between the ALL10.DEL.bed file and each INDEL.BED file
 done
 
 for BED in *.INS.bed ; do
   bedtools intersect -F 0.99 -c -a ALL10.DEL.filtered_overlaps.bed -b $BED > TEMP.${BED}
 done
-  
 
 ### Step 4: Creating combined files:
-echo -e "CHR\tSTART\tEND\t"$( ls TEMP.*.DEL.bed ) | sed "s/ /\t/g" > header.txt
+echo -e "CHR\tSTART\tEND\t"$( ls TEMP.*.DEL.bed ) | sed "s/ /\t/g;s/TEMP\.//g;s/\.DEL.bed//g" > ALL10.DEL.tsv
 for BED in TEMP.*.DEL.bed ; do 
-  cut -f 4 $BED | paste TEMP - > TEMP1
-  mv TEMP1 TEMP; 
+  cut -f 4 $BED | paste TEMP.DEL - > TEMP1.DEL
+  mv TEMP1.DEL TEMP.DEL; 
 done
-cp header.txt ALL10.DEL.tsv
-paste ALL10.DEL.filtered_overlaps.bed TEMP1 >> ALL10.DEL.tsv
+paste ALL10.DEL.filtered_overlaps.bed TEMP.DEL >> ALL10.DEL.tsv
 # Iterates over ALL10.*.INDEL.bed files, extracts the 4th field, and merges it into a temporary file
 
+echo -e "CHR\tSTART\tEND\t"$( ls TEMP.*.INS.bed ) | sed "s/ /\t/g;s/TEMP\.//g;s/\.INS.bed//g" > ALL10.INS.tsv
+for BED in TEMP.*.INS.bed ; do 
+  cut -f 4 $BED | paste TEMP.INS - > TEMP1.INS
+  mv TEMP1.INS TEMP.INS ; 
+done
+paste ALL10.INS.merged.bed TEMP.INS >> ALL10.INS.tsv
+# Iterates over ALL10.*.INDEL.bed files, extracts the 4th field, and merges it into a temporary file
 
+### Step 5: 
+bedtools getfasta -fi CK2021.60.corrected.fasta -bed ALL10.DEL.filtered_overlaps.bed -fo ALL10.DEL.filtered_overlaps.fasta
+# Extracting FASTA Sequences of DELs
+awk '$4-$3<=10 && $5==1 && $11-$10>=50' *.var.txt | sort -u -k1,3 | awk '{print ">"$2":"$3"-"$4"\t"$8}' | sed "s/\t/\n/g" > ALL10.INS.merged.fasta
+# Filter and process variant data from multiple .var.txt files. 
+cat ALL10.INS.merged.fasta ALL10.DEL.filtered_overlaps.fasta > ALL10.INDEL.merged.fasta
+# Concatenate DEL and INS sequences
+cd-hit-est -r 1 -g 1 -c 0.95 -i ALL10.INDEL.merged.fasta -o ALL10.INDEL.95_90.clusters.fasta -T 0 -aL 0.90 -M 370000 -d 50 -n 10
+# Cluster INS and DEL sequences
+awk '$0~/>Cluster/ {print a"\t"b"\t"c"\t"e; a=$0;b=0;c=0} 
+$0!~/>Cluster/ {b+=1; if ($0~/*/) {match($0,/([0-9]+)nt, >(.+)\.\.\./,d);c=d[2];e=d[1]}} 
+END {print a"\t"b"\t"c"\t"e}' ALL10.INDEL.95_90.clusters.fasta.clstr | \
+sed "s/ //g" > ALL10.INDEL.95_90.clusters.stat.tsv
+# Statistics on the INDEL sequences
