@@ -83,4 +83,4 @@ awk '$0~/>Cluster/ {print a"\t"b"\t"c"\t"e; a=$0;b=0;c=0}
 $0!~/>Cluster/ {b+=1; if ($0~/*/) {match($0,/([0-9]+)nt, >(.+)\.\.\./,d);c=d[2];e=d[1]}} 
 END {print a"\t"b"\t"c"\t"e}' ALL10.INDEL.95_90.clusters.fasta.clstr | \
 sed "s/ //g" > ALL10.INDEL.95_90.clusters.stat.tsv
-# Statistics on the INDEL sequences
+# Making statistics on the INDEL sequences and identify those non-simple repeats involved in at least three distinct INDELs as putatively active SWO transposable families 
