@@ -24,7 +24,24 @@ for VAR in *.fasta.var.txt ; do
   cat ${VAR%.fasta.var.txt}.DEL.tsv ${VAR%.fasta.var.txt}.INS.tsv | bedtools sort -i - > ${VAR%.fasta.var.txt}.INDEL.bed
   # Concatenates the deletion and insertion files into a single INDEL.bed file and sort according to the chromosomes and coordinates
 done
-cat *.INDEL.bed | bedtools merge -i -d
+
+cat *.INS.bed | bedtools sort -i - > merged.temp.INS.bed
+bedtools intersect -a merged.temp.INS.bed -b merged.temp.INS.bed -wao > merged.temp.INS.overlaps.bed
+awk 'BEGIN {OFS="\t"} ($2<$5) || ($2==$5 && $3<$6) { 
+     lenA = $3 - $2;
+     lenB = $6 - $5;
+     overlap = $NF;
+     if (overlap/lenA >= 0.95 && overlap/lenB >= 0.95) {
+         print $1, $2, $3
+     }
+}' merged.temp.INS.overlaps.bed > merged.temp.INS.filtered_overlaps.bed
+# Concatenate INS from all assemblies and remove duplications with reciprocal 95% overlap
+
+cat *.DEL.bed | bedtools sort -i - | bedtools merge -d 10 -i - > merged.temp.DEL.merged.bed
+# Concatenate DEL from all assemblies and merge those within 10 bp distances
+
+cat merged.temp.INS.filtered_overlaps.bed merged.temp.DEL.merged.bed | bedtools sort -i - > ALL10.INDEL.bed
+# Merge deduplicated INS and DEL beds into one file
 
 ### Step 3: 'for' loop - Intersection analysis with bedtools:
 for BED in [list of INDEL.bed files]; do
