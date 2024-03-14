@@ -1,981 +1,1553 @@
-# Transposon insertion locus (IL) scanning
-## Software installation
+# Detection of active transposable elements (TE) and TE insertion locus (IL) identification
 
+## Software requirements
+    Python3.* (version>=3.7; tested on 3.9 and 3.10)
+    gawk (tested on GNU Awk 5.1.0)
+    cd-hit (version=4.8.1; only used for active TE family detection)
+    samtools (version>=1.12; tested on v1.15, v1.17, and v1.18)
+    bcftools (version>=1.12; tested on v1.15, v1.17, and v1.18)
+    blast (version>=2.14; tested on v2.14)
+    pandas (tested on v1.5.2)
+    bwa (tested on version=0.7.17)
+    emboss (tested on version=6.6.0)
+    minimap2 (version>=2.17; tested on v2.17 and v2.26)
+    
+## One-step software installation
+```bash
+# Download the repository
+git clone https://github.com/TheLuoFengLab/Transposon-insertion-locus-simulation-and-scanning.git
 
+# Install tools in TESCAN.yml
+conda env create -n TESCAN -f Transposon-insertion-locus-simulation-and-scanning/Conda_environment/TESCAN.yml
 
-# # File content for FOUR_TE_INSERTION.sh (github)
+# Or, install using TESCAN.txt
+conda create --name TESCAN --file Transposon-insertion-locus-simulation-and-scanning/Conda_environment/TESCAN.txt
+
+# Activate conda environment
+conda activate TESCAN
+```
+# Active TE in SWO assemblies
+
+Mapping 10 SWO assemblies to DVS and call variants
+
+/zfs/socbd/bwu4/YU/annotation/FOUR_TE/TE_IN_CITRUS_GENOMES/SWO
+
+```bash
+for FAS in GCA_019144245.1.fasta GCA_019144225.1.fasta GCA_019144195.1.fasta GCA_019144185.1.fasta GCA_019144155.1.fasta GCA_019143665.1.fasta GCA_018104345.1.fasta Csiv4.fasta T78.asem.fasta SF.asem.fasta ; do
+minimap2 -cx asm5 -t8 --cs CK2021.60.corrected.fasta $FAS > asm.paf  # keeping this file is recommended; --cs required!
+sort -k6,6 -k8,8n asm.paf > asm.srt.paf             # sort by reference start coordinate
+k8 paftools.js call asm.srt.paf > ${FAS}.var.txt
+done
+
+for VAR in *.fasta.var.txt ; do
+awk '$5==1 && $4-$3>50 && $4-$3<20000 && $11-$10<=10 {print $2"\t"$3"\t"$4}' $VAR > ${VAR%.fasta.var.txt}.DEL.tsv
+awk '$5==1 && $4-$3<=10 && $11-$10>50 && $11-$10<20000 {print $2"\t"$3"\t"$4}' $VAR > ${VAR%.fasta.var.txt}.INS.tsv
+
+cat ${VAR%.fasta.var.txt}.DEL.tsv ${VAR%.fasta.var.txt}.INS.tsv > ${VAR%.fasta.var.txt}.INDEL.bed
+done
+
+for BED in Csiv4.INDEL.bed T78.asem.INDEL.bed SF.asem.INDEL.bed GCA_019144245.1.INDEL.bed GCA_019144225.1.INDEL.bed GCA_019144195.1.INDEL.bed GCA_019144185.1.INDEL.bed GCA_019144155.1.INDEL.bed GCA_019143665.1.INDEL.bed GCA_018104345.1.INDEL.bed; do
+echo $BED
+bedtools intersect -f 0.95 -F 0.95 -c -a ALL10.INDEL.bed -b $BED > ALL10.${BED}
+done
+
+for BED in ALL10.*.INDEL.bed ; do cut -f 4 $BED | paste TEMP - > TEMP1 ; mv TEMP1 TEMP; done
+
+paste ALL10.INDEL.bed TEMP | sed "s/\t\t/\t/g" > TEMP1
+mv TEMP1 TEMP
+echo -e "CHR\tSTART\tEND\t"$( ls ALL10.*.INDEL.bed ) | sed "s/ /\t/g" > header.txt
+
+cat header.txt TEMP > ALL10.INDEL.tsv
+# Remove duplicate indels with both ends with distances <= 15 bp in excel
+# Name all INDELs in excel and paste the deletions in ALL10.INS.bed
+sed -i 's/INDEL/DEL/g' ALL10.DEL.bed
+bedtools getfasta -fi CK2021.60.corrected.fasta -bed ALL10.DEL.bed -fo ALL10.DEL.fasta
+
+awk '$4-$3<=10 && $5==1 && $11-$10>=50' *.var.txt | sort -u -k1,3 | awk '{print ">"$2":"$3"-"$4"\t"$8}' | sed "s/\t/\n/g" > INS.fasta
+
+cat DEL.gi | cdbyank INS.fasta.cidx > ALL10.INS.fasta
+
+cat ALL10.INS.fasta ALL10.DEL.fasta > ALL10.INDEL.fasta
+
+cd-hit-est -r 1 -g 1 -c 0.80 -i ALL10.INDEL.fasta -o ALL10.INDEL.80_50.clusters.fasta -T 0 -aL 0.50 -M 370000 -d 50 -n 10
+awk '$0~/>Cluster/ {print a"\t"b"\t"c"\t"e; a=$0;b=0;c=0} $0!~/>Cluster/ {b+=1; if ($0~/*/) {match($0,/([0-9]+)nt, >(.+)\.\.\./,d);c=d[2];e=d[1]}} END {print a"\t"b"\t"c"\t"e}' ALL10.INDEL.80_50.clusters.fasta.clstr | sed "s/ //g" > ALL10.INDEL.80_50.clusters.stat.tsv
+
+cd-hit-est -r 1 -g 1 -c 0.95 -i ALL10.INDEL.fasta -o ALL10.INDEL.95_90.clusters.fasta -T 0 -aL 0.90 -M 370000 -d 50 -n 10
+awk '$0~/>Cluster/ {print a"\t"b"\t"c"\t"e; a=$0;b=0;c=0} $0!~/>Cluster/ {b+=1; if ($0~/*/) {match($0,/([0-9]+)nt, >(.+)\.\.\./,d);c=d[2];e=d[1]}} END {print a"\t"b"\t"c"\t"e}' ALL10.INDEL.95_90.clusters.fasta.clstr | sed "s/ //g" > ALL10.INDEL.95_90.clusters.stat.tsv
+
+```
+
+#Sniffles2 protocol failed
+
+```bash
+for FAS in GCA_019144245.1.fasta GCA_019144225.1.fasta GCA_019144195.1.fasta GCA_019144185.1.fasta GCA_019144155.1.fasta GCA_019143665.1.fasta GCA_018104345.1.fasta Csiv4.fasta ; do
+minimap2 -t 20 -ax asm10 CK2021.60.corrected.fasta $FAS | samtools sort -o ${FAS%.fasta}.srt.bam
+sniffles --input ${FAS%.fasta}.srt.bam --snf ${FAS%.fasta}.snf
+done
+
+sniffles --minsupport 1 --minsvlen 100 --long-ins-length 20000 --combine-output-filtered --allow-overwrite --combine-null-min-coverage 1 --combine-low-confidence 0 --combine-low-confidence-abs 1 --input SF.snf T78.snf GCA_019144245.1.snf GCA_019144225.1.snf GCA_019144195.1.snf GCA_019144185.1.snf GCA_019144155.1.snf GCA_019143665.1.snf GCA_018104345.1.snf Csiv4.snf --vcf 04142022_allgenomes_4kb.vcf
+
+sniffles --minsupport 1 --minsvlen 4000 --long-ins-length 20000 --combine-output-filtered --allow-overwrite --combine-null-min-coverage 1 --combine-low-confidence 0 --combine-low-confidence-abs 1 --input SF.snf T78.snf GCA_019144245.1.snf GCA_019144225.1.snf GCA_019144195.1.snf GCA_019144185.1.snf GCA_019144155.1.snf GCA_019143665.1.snf GCA_018104345.1.snf Csiv4.snf --vcf 04142022_allgenomes_4kb.vcf
+
+sniffles --minsupport 1 --minsvlen 50 --long-ins-length 20000 --combine-output-filtered --allow-overwrite --combine-null-min-coverage 1 --combine-low-confidence 0 --combine-low-confidence-abs 1 --input SF.snf T78.snf GCA_019144245.1.snf GCA_019144225.1.snf GCA_019144195.1.snf GCA_019144185.1.snf GCA_019144155.1.snf GCA_019143665.1.snf GCA_018104345.1.snf Csiv4.snf --vcf 04142022_allgenomes_50.vcf
+
+grep ":0:1:Sniffles2" 04142022_allgenomes_50.vcf | grep INS | grep -v IMPRECISE | \
+	awk '{print ">"$3"\t"$5}' | sed "s/\t/\n/g" > 04152022_allgenomes.INS.fasta
+
+grep ":0:1:Sniffles2" 04142022_allgenomes_50.vcf | grep DEL | grep -v IMPRECISE | awk '{match($8,/END=([^;]+);/,a); print $1"\t"$2"\t"a[1]"\t"$3 }' > 04152022_allgenomes.DEL.bed
+
+bedtools getfasta -nameOnly -fi CK2021.60.corrected.fasta -bed 04152022_allgenomes.DEL.bed -fo 04152022_allgenomes.DEL.fasta
+
+cat 04152022_allgenomes.INS.fasta 04152022_allgenomes.DEL.fasta > 04152022_allgenomes.INDEL.fasta
+
+#Filter indels <=50 bp and >=50000 bp
+bioawk -c fastx '{ if(length($seq)>50 && length($seq)<50000 ) { print ">"$name; print $seq }}' 04152022_allgenomes.INDEL.fasta > 04152022_allgenomes.INDEL.50_50kb.fasta
+sed -i 's/Sniffles2.//g' 04152022_allgenomes.INDEL.50_50kb.fasta # Delete Sniffles2. from the sequence names
+
+#Clustering with 95% identity and 90% alignment coverage of the long sequence
+cd-hit-est -r 1 -g 1 -c 0.95 -i 04152022_allgenomes.INDEL.50_50kb.fasta -o 04152022_allgenomes.INDEL.95_90.clusters.fasta -T 0 -aL 0.90 -M 370000 -d 50 -n 10
+
+#Clustering with 95% identity and 90% alignment coverage of the long sequence
+cd-hit-est -r 1 -g 1 -c 0.80 -i 04152022_allgenomes.INDEL.50_50kb.fasta -o 04152022_allgenomes.INDEL.80_50.clusters.fasta -T 0 -aL 0.50 -M 370000 -d 50 -n 10
+
+awk '$0~/>Cluster/ {print a"\t"b"\t"c"\t"e; a=$0;b=0;c=0} $0!~/>Cluster/ {b+=1; if ($0~/*/) {match($0,/([0-9]+)nt, >(.+)\.\.\./,d);c=d[2];e=d[1]}} END {print a"\t"b"\t"c"\t"e}' 04152022_allgenomes.INDEL.95_90.clusters.fasta.clstr | sed "s/ //g" > 04152022_allgenomes.INDEL.95_90.clusters.stat.tsv
+
+awk '$0~/>Cluster/ {print a"\t"b"\t"c"\t"e; a=$0;b=0;c=0} $0!~/>Cluster/ {b+=1; if ($0~/*/) {match($0,/([0-9]+)nt, >(.+)\.\.\./,d);c=d[2];e=d[1]}} END {print a"\t"b"\t"c"\t"e}' 04152022_allgenomes.INDEL.80_50.clusters.fasta.clstr | sed "s/ //g" > 04152022_allgenomes.INDEL.80_50.clusters.stat.tsv
+```
+
+#Maually curate all TE member terminal haplotypes from 32 different families and output all of them as NEW*_LEFT/RIGHT_50bp.align.fasta
+
+#Python script for summarizing terminal haplotypes d:\SWO\SWO_TE\TERMINAL_HAP.py
+
+```python
+#!/usr/bin/env python3
+
+import pandas as pd
+import os
+import sys
+
+PRE=sys.argv[1]
+
+RIGHT_ALL=pd.read_table(PRE+'_RIGHT_50bp.align.fasta',names=['ID','R_HAP','R_COUNT']).drop(['R_COUNT'],axis=1)
+RIGHT_COUNT = RIGHT_ALL.groupby('R_HAP').count().reset_index().rename(columns={"ID": "R_COUNT"})
+RIGHT_COUNT = RIGHT_COUNT.sort_values('R_COUNT',ascending=False)
+RIGHT_COUNT = RIGHT_COUNT.reset_index(drop=True)
+RIGHT_COUNT['RHAP_ID'] = 'R'+RIGHT_COUNT.index.astype(str)
+RIGHT_ALL = RIGHT_ALL.merge(RIGHT_COUNT, on='R_HAP')
+
+LEFT_ALL=pd.read_table(PRE+'_LEFT_50bp.align.fasta',names=['ID','L_HAP','L_COUNT']).drop(['L_COUNT'],axis=1)
+LEFT_COUNT = LEFT_ALL.groupby('L_HAP').count().reset_index().rename(columns={"ID": "L_COUNT"})
+LEFT_COUNT = LEFT_COUNT.sort_values('L_COUNT',ascending=False)
+LEFT_COUNT = LEFT_COUNT.reset_index(drop=True)
+LEFT_COUNT['LHAP_ID'] = 'L'+LEFT_COUNT.index.astype(str)
+LEFT_ALL = LEFT_ALL.merge(LEFT_COUNT, on='L_HAP')
+
+ALL = LEFT_ALL.merge(RIGHT_ALL,on='ID')
+ALL.to_csv(PRE+'_MEMBER_TERMINAL_HAP.tsv', sep="\t", header=True, index=False)
+ALL_SUB=ALL.loc[(ALL['L_COUNT']>1) | (ALL['R_COUNT']>1) ]
+
+LEFT=ALL_SUB[['LHAP_ID', 'L_HAP']].drop_duplicates()
+LEFT['LHAP_ID']=">"+LEFT['LHAP_ID']
+LEFT.to_csv(PRE+'_LEFT_50bp_SUB.fasta', sep="\t", header=False, index=False)
+
+RIGHT=ALL_SUB[['RHAP_ID', 'R_HAP']].drop_duplicates()
+RIGHT['RHAP_ID']=">"+RIGHT['RHAP_ID']
+RIGHT.to_csv(PRE+'_RIGHT_50bp_SUB.fasta', sep="\t", header=False, index=False)
+```
+
+```bash
+cd /mnt/d/SWO/SWO_TE
+for N in {1..32} ; do x="NEW"$N ; ./TERMINAL_HAP.py $x ; done
+```
+
+```bash
+for N in {1..32} ; do 
+blastn -task blastn-short -num_threads 40 -query NEW${N}_LEFT_50bp_SUB.fasta \
+-db CK2021 -outfmt 6 | awk '$3==100 && $4==50 && $9<$10 {print $1"\t"$2"\t"$9"\tPLUS"} $3==100 && $4==50 && $9>$10 {print $1"\t"$2"\t"$9"\tMINUS"}' > NEW${N}_PRE_LEFT.tsv
+blastn -task blastn-short -num_threads 40 -query NEW${N}_RIGHT_50bp_SUB.fasta \
+-db CK2021 -outfmt 6 | awk '$3==100 && $4==50 && $9<$10 {print $1"\t"$2"\t"$10"\tPLUS"} $3==100 && $4==50 && $9>$10 {print $1"\t"$2"\t"$10"\tMINUS"}' > NEW${N}_PRE_RIGHT.tsv
+done
+```
+
+```bash
+for ID in {2..32}; do ./IDENTIFY_COPY_IN_DVS.py NEW${ID} ; done
+```
+
+### ### IDENTIFY_COPY_IN_DVS.py
+
+```python
+#!/usr/bin/env python3
+
+import pandas as pd
+import os
+import sys
+
+PRE=sys.argv[1]
+
+LEFT = pd.read_table(PRE+'_PRE_LEFT.tsv',names=['LHAP_ID','CHR','L_COOR','STRAND'])
+RIGHT = pd.read_table(PRE+'_PRE_RIGHT.tsv',names=['RHAP_ID','CHR','R_COOR','STRAND'])
+
+LIST=[]
+for i in LEFT.index:
+    if LEFT.iloc[i]['STRAND']=="MINUS" :
+        DF=RIGHT.loc[(RIGHT['CHR']==LEFT.iloc[i]['CHR']) & (LEFT.iloc[i]['L_COOR']-RIGHT['R_COOR']<20000) & (LEFT.iloc[i]['L_COOR']-RIGHT['R_COOR']>0) & (LEFT.iloc[i]['STRAND']==RIGHT['STRAND'])]
+    if LEFT.iloc[i]['STRAND']=="PLUS" :
+        DF=RIGHT.loc[(RIGHT['CHR']==LEFT.iloc[i]['CHR']) & (LEFT.iloc[i]['L_COOR']-RIGHT['R_COOR']>-20000) & (LEFT.iloc[i]['L_COOR']-RIGHT['R_COOR']<0) & (LEFT.iloc[i]['STRAND']==RIGHT['STRAND'])]
+    if len(DF.index)>0:
+        DF['LHAP_ID']=LEFT.iloc[i]['LHAP_ID']
+        DF['L_COOR']=LEFT.iloc[i]['L_COOR']
+    else:
+        DF=pd.DataFrame(LEFT.iloc[i]).T
+        DF['RHAP_ID']="NA"
+        DF['R_COOR']="NA"
+    LIST.append(DF)
+
+df=pd.concat(LIST)
+
+df1=RIGHT.loc[~RIGHT['R_COOR'].isin(df['R_COOR'])]
+df1['LHAP_ID']="NA"
+df1['L_COOR']="NA"
+
+pd.concat([df,df1]).to_csv(PRE+'_COPY_IN_DVS.tsv',sep="\t",header=True,index=False)
+```
+
+```bash
+for N in {1..32} ; do
+cat NEW${N}_COPY_IN_DVS.tsv | awk \
+'NR>1 && $3!="NA" && $6!="NA" && $3<$6 {print $2"\t"$3-1"\t"$6"\t"$2":"$3-1"-"$6"\t.\t-"} NR>1 && $3!="NA" && $6!="NA" && $3>$6 {print $2"\t"$6-1"\t"$3"\t"$2":"$6-1"-"$3"\t.\t+"}' > NEW${N}_INTACT_COPIES.bed
+cat NEW${N}_COPY_IN_DVS.tsv | awk \
+'$3=="NA" && $4=="PLUS" {print $2"\t"$6-1"\t"$6+49} $3=="NA" && $4=="MINUS" {print $2"\t"$6-50"\t"$6} $6=="NA" && $4=="MINUS" {print $2"\t"$3-1"\t"$3+49} $6=="NA" && $4=="PLUS" {print $2"\t"$3-50"\t"$3}' > NEW${N}_UNINTACT_COPIES.bed
+done
+
+```
+
+```bash
+bedtools getfasta -s -fi CK2021.60.corrected.fasta -bed NEW8_INTACT_COPIES.bed  -fo NEW8_INTACT_COPIES.fasta
+cd-hit-est -r 1 -g 1 -c 0.97 -i NEW8_INTACT_COPIES.fasta -o NEW8_INTACT_COPIES.97_95.clusters.fasta -T 0 -aL 0.95 -M 370000 -d 50 -n 10
+```
+
+### # REP_INTACT_BLAST.sh
+
+```bash
+#!/bin/bash
+ID=$1
+bedtools getfasta -s -fi CK2021.60.corrected.fasta -bed ${ID}_INTACT_COPIES.bed  -fo ${ID}_INTACT_COPIES.fasta
+sed -i 's/(+)//g;s/(-)//g' ${ID}_INTACT_COPIES.fasta
+cdbfasta ${ID}_INTACT_COPIES.fasta
+grep ">" ${ID}_INTACT_COPIES.fasta | sort -u | sed "s/>//g" > ${ID}_INTACT_UNIQ.gi
+cat ${ID}_INTACT_UNIQ.gi | cdbyank ${ID}_INTACT_COPIES.fasta.cidx - > ${ID}_INTACT_UNIQ_COPIES.fasta
+makeblastdb -in ${ID}_INTACT_UNIQ_COPIES.fasta -out ${ID}_INTACT -parse_seqids -dbtype nucl
+cd-hit-est -r 1 -g 1 -c 0.97 -i ${ID}_INTACT_COPIES.fasta -o ${ID}_INTACT_COPIES.97_95.clusters.fasta -T 0 -M 370000 -d 50 -n 10
+
+cat ${ID}_REP.gi | cdbyank ${ID}_INTACT_COPIES.fasta.cidx - > ${ID}_REP.fasta
+makeblastdb -in ${ID}_REP.fasta -out ${ID}_REP -parse_seqids -dbtype nucl
+blastn -query ${ID}_REP.fasta -db ${ID}_REP -outfmt 6 -num_threads 40
+blastn -query ${ID}_REP.fasta -db ${ID}_INTACT -outfmt 6 -num_threads 40 | awk -v x=$2 '$3>97 && $4>x' > ${ID}_REP_INTACT.results
+```
+
+### # TE representatives were selected for each TE family:
+
+(1) Each terminal haplotype only selected once;
+
+(2) Each cluster (${ID}_INTACT_COPIES.97_95.clusters.fasta.clstr) with ≥4 members has one member selected;
+
+```bash
+# Further check the uniqueness of the terminals of the TE representatives
+for FASTA in *_50bp_SUB.fasta; do
+blastn -task blastn-short -num_threads 40 -query ALLTE_TERMINAL.fasta -db ALLTE_REP -outfmt 6 | \
+awk '$3==100 && $4==50' > ${FASTA%_50bp_SUB.fasta}_REP.results
+done
+
+cat NEW*_REP.fasta > ALLTE_REP.fasta
+blastn -num_threads 40 -query ALLTE_REP.fasta -db CK2021 -outfmt 6 | \
+awk '$3>95 && $4>=100 && $9<$10 {print $2"\t"$9-1"\t"$10} $3>97 && $4>=100 && $9>$10 {print $2"\t"$10-1"\t"$9}' > TO_MASK.bed
+for TSV in NEW*_PRE_LEFT.tsv ; do
+awk '$4=="PLUS" {print $2"\t"$3-1"\t"$3+49} $4=="MINUS" {print $2"\t"$3-50"\t"$3}' $TSV >> TE_LEFT.bed
+done
+for TSV in NEW*_PRE_RIGHT.tsv ; do
+awk '$4=="PLUS" {print $2"\t"$3-50"\t"$3} $4=="MINUS" {print $2"\t"$3-1"\t"$3+49}' $TSV >> TE_RIGHT.bed
+done
+
+cat TO_MASK.bed TE_LEFT.bed TE_RIGHT.bed | bedtools sort -i - | bedtools merge -i - > NEW_TO_MASK.bed
+
+blastn -query ALLTE_REP.fasta -db CK2021.05072022.MASKED -outfmt 6 -num_threads 40 | \
+awk '$3>99 && $4>48 && $4<100 && $7<10 && $9<$10 {print $2"\t"$9-1"\t"$10} $3>99 && $4>48 && $4<100 && $7<10 && $9>$10 {print $2"\t"$10-1"\t"$9}' >> more_mask.bed
+
+```
+
+```bash
+for SRR in $( head -n 10 SWO.list ); do
+if [[ ! -a ${SRR}.TE_05082022.srt.bam ]]; then
+bwa mem -t 40 CK2021.05072022.MASKED.fasta ${SRR}_1.clean.fastq \
+${SRR}_2.clean.fastq > ${SRR}.sam
+samtools sort -@ 20 -O BAM -o ${SRR}.TE_05082022.srt.bam ${SRR}.sam
+fi
+done
+```
+
+```bash
+for SRR in $( cat LEN150.txt ); do
+    if [[ ! -a ${SRR}.DISC_SUP.bed ]]; then  
+        ./TE_INSERT_READ.sh TE_LIST.txt ${SRR} 40 150 500 TE CK2021.05072022.MASKED.fasta 
+    fi 
+done
+```
+
+## IL results statistics
+
+```bash
+# Separate MU1 and MU2 ILs
+for pat in TE{1..32}; do
+mkdir $pat
+done
+
+for SAMP in $( cat ALL0510.txt ); do
+for pat in TE{1..32}_; do
+awk -v pat=$pat '$4~pat && $2>0 {print $0}' ${SAMP}.SPLIT_SUP.bed > ${pat%_}/${SAMP}.${pat%_}.SPLIT_SUP.bed
+done
+done
+
+for SAMP in $( cat ALL0510.txt ); do
+for pat in TE{1..32}_; do
+awk -v pat=$pat '$4~pat && $2>0 {print $0}' ${SAMP}.DISC_SUP.bed > ${pat%_}/${SAMP}.${pat%_}.DISC_SUP.bed
+done
+done
+
+# Put all ILs detected by SPLIT and DISC reads in one bed file
+for pat in TE{1..32}; do
+cat ${pat}/*.${pat}.SPLIT_SUP.bed > ALL_${pat}.SPLIT.bed
+done
+
+for pat in TE{1..32}; do
+cat ${pat}/*.${pat}.DISC_SUP.bed > ALL_${pat}.DISC.bed
+done
+
+for pat in TE{1..32}; do
+    cat ALL_${pat}.SPLIT.bed ALL_${pat}.DISC.bed > ALL_${pat}.SPLIT_DISC.bed
+    bedtools sort -i ALL_${pat}.SPLIT.bed | \
+        bedtools merge -d 15 -i - > ALL_${pat}.SPLIT_IL.merged.bed
+    bedtools intersect -wo -a ALL_${pat}.SPLIT_IL.merged.bed  \
+        -b ALL_${pat}.SPLIT.bed > ALL_${pat}.SPLIT_IL.SPLIT.intersect
+    bedtools intersect -wo -a ALL_${pat}.SPLIT_IL.merged.bed  \
+        -b ALL_${pat}.DISC.bed > ALL_${pat}.SPLIT_IL.DISC.intersect
+done
+
+for pat in TE{1..32}; do
+    bedtools intersect -c -a ALL_${pat}.SPLIT_IL.merged.bed \
+        -b ALL_${pat}.SPLIT_DISC.bed > ALL_${pat}.SPLIT_IL.SPLIT_DISC.count.tsv
+    awk '$4>1' ALL_${pat}.SPLIT_IL.SPLIT_DISC.count.tsv | \
+        cut -f 1,2,3 > ALL_${pat}.2SUP.bed
+done
+
+for pat in TE{1..32}; do
+    bedtools intersect -c -a ALL_${pat}.SPLIT_IL.merged.bed \
+        -b ALL_${pat}.SPLIT.bed > ALL_${pat}.SPLIT_IL.SPLIT.count.tsv
+    awk '$4>1' ALL_${pat}.SPLIT_IL.SPLIT.count.tsv | \
+        cut -f 1,2,3 > ALL_${pat}.2SPLIT_SUP.bed
+done
+
+tr '\n' '\t' < ALL0510.txt > header.txt
+echo -e "chr\tLeft\tRight\t$( cat header.txt )" > header.txt
+
+bedtools intersect -c -a ALL_TE1.2SPLIT_SUP.bed -b TE1/CK.TE1.SPLIT_SUP.bed
+
+for pat in TE{1..32}; do
+rm -f TEMP.tsv
+cp ALL_${pat}.2SPLIT_SUP.bed TEMP.tsv
+for SAMP in $( cat ALL0510.txt ); do
+bedtools intersect -c -a ALL_${pat}.2SPLIT_SUP.bed -b ${pat}/${SAMP}.${pat}.SPLIT_SUP.bed | \
+cut -f 4 | paste TEMP.tsv - > TEMP1.tsv
+mv TEMP1.tsv TEMP.tsv
+done
+cat header.txt TEMP.tsv > ALL_SAMP.${pat}.SPLIT.read_count.tsv
+done
+
+for pat in TE{1..32}; do
+for SAMP in $( cat ALL0510.txt ); do
+echo ${pat}" "${SAMP}"\t"$( wc -l ${pat}/${SAMP}.${pat}.IL.DISC_COUNT.bed )
+done
+done
+```
+
+ ## DISC_2IL.sh: Deal with DISC reads supporting more than one IL
+
+```bash
+#!/bin/bash 
+pat=$1
+for SAMP in $( cat ALL0510.txt ); do
+# Identify ILs supported by split-mapped reads 
+bedtools intersect -wa -a ALL_${pat}.2SPLIT_SUP.bed \
+-b ${pat}/${SAMP}.${pat}.SPLIT_SUP.bed | \
+sort -u > ${pat}/${SAMP}.${pat}_IL_SPLIT.bed
+  
+# Identify ILs not supported by split-mapped reads
+bedtools intersect -v -a ALL_${pat}.2SPLIT_SUP.bed \
+-b ${pat}/${SAMP}.${pat}.SPLIT_SUP.bed > ${pat}/${SAMP}.${pat}_IL_NOSPLIT.bed
+  
+# DISC reads uniquely supporting split-read supported ILs
+bedtools intersect -wo -a ${pat}/${SAMP}.${pat}_IL_SPLIT.bed \
+-b ${pat}/${SAMP}.${pat}.DISC_SUP.bed | cut -f 10 | sort | \
+uniq -u > ${pat}/${SAMP}.${pat}_IL_SPLIT.uniq_DISC.txt
+
+# ALL DISC (including those matching two ILs) reads supporting split-read supported ILs
+bedtools intersect -wo -a ${pat}/${SAMP}.${pat}_IL_SPLIT.bed \
+-b ${pat}/${SAMP}.${pat}.DISC_SUP.bed | cut -f 10 | \
+sort -u > ${pat}/${SAMP}.${pat}_IL_SPLIT.ALL_DISC.txt
+
+./SUBSET_COLUMN1.py ${pat} ${SAMP}
+
+# DISC read count on split-read supported IL in SAMP
+bedtools intersect -c -a ${pat}/${SAMP}.${pat}_IL_SPLIT.bed \
+-b ${pat}/${SAMP}.${pat}.SPLIT_UNIQ_DISC_SUP.bed > \
+${pat}/${SAMP}.${pat}.SPLIT_IL.DISC_COUNT.bed
+
+# Output DISC read ids on ILs without split-read support
+bedtools intersect -wo -a ${pat}/${SAMP}.${pat}_IL_NOSPLIT.bed \
+-b ${pat}/${SAMP}.${pat}.NOSPLIT_DISC_SUP.bed | \
+cut -f 10 | sort | uniq -u > ${SAMP}.${pat}.UNIQ_NOSPLIT_DISC_SUP.txt
+
+./SUBSET_COLUMN2.py ${pat} ${SAMP}
+
+# DISC read count on non-split-read supported IL in SAMP
+bedtools intersect -c -a ${pat}/${SAMP}.${pat}_IL_NOSPLIT.bed \
+-b ${pat}/${SAMP}.${pat}.NOSPLIT_UNIQ_DISC_SUP.bed > \
+${pat}/${SAMP}.${pat}.NOSPLIT_IL.DISC_COUNT.bed
+
+# Concatenate DISC read counts of SPLIT and NOSPLIT IL
+cat ${pat}/${SAMP}.${pat}.SPLIT_IL.DISC_COUNT.bed ${pat}/${SAMP}.${pat}.NOSPLIT_IL.DISC_COUNT.bed | \
+bedtools sort -i - > ${pat}/${SAMP}.${pat}.IL.DISC_COUNT.bed
+done
+```
+
+```bash
+parallel ./DISC_2IL.sh ::: TE{1..32}
+```
+
+### # SUBSET_COLUMN1.py
+
+```python
+#!/usr/bin/env python3
+
+import pandas as pd
+import sys
+
+TE=sys.argv[1]
+SAMP=sys.argv[2]
+
+with open(f'{TE}/{SAMP}.{TE}_IL_SPLIT.uniq_DISC.txt') as file:
+    UNIQ = file.readlines()
+    UNIQ = [line.rstrip() for line in UNIQ]
+with open(f'{TE}/{SAMP}.{TE}_IL_SPLIT.ALL_DISC.txt') as file:
+    ALL = file.readlines()
+    ALL = [line.rstrip() for line in ALL]
+
+DISC=pd.read_table(f'{TE}/{SAMP}.{TE}.DISC_SUP.bed',header=None)
+DISC.loc[DISC[6].isin(UNIQ)].to_csv(f'{TE}/{SAMP}.{TE}.SPLIT_UNIQ_DISC_SUP.bed', sep="\t", header=False, index=False)
+DISC.loc[~DISC[6].isin(ALL)].to_csv(f'{TE}/{SAMP}.{TE}.NOSPLIT_DISC_SUP.bed', sep="\t", header=False, index=False)
+```
+
+## # SUBSET_COLUMN2.py
+
+```python
+#!/usr/bin/env python3
+
+import pandas as pd
+import sys
+
+TE=sys.argv[1]
+SAMP=sys.argv[2]
+
+with open(f'{SAMP}.{TE}.UNIQ_NOSPLIT_DISC_SUP.txt') as file:
+    UNIQ = file.readlines()
+    UNIQ = [line.rstrip() for line in UNIQ]
+
+DISC=pd.read_table(f'{TE}/{SAMP}.{TE}.DISC_SUP.bed', header=None)
+DISC.loc[DISC[6].isin(UNIQ)].to_csv(f'{TE}/{SAMP}.{TE}.NOSPLIT_UNIQ_DISC_SUP.bed', sep="\t", header=False, index=False)
+```
+
+```bash
+# Put all sample DISC read counts into one large table
+for pat in TE{1..32}; do
+rm -f TEMP.tsv
+bedtools sort -i ALL_${pat}.2SPLIT_SUP.bed > TEMP.tsv
+for SAMP in $( cat ALL0510.txt ); do
+cut -f 4 ${pat}/${SAMP}.${pat}.IL.DISC_COUNT.bed | paste TEMP.tsv - > TEMP1.tsv
+mv TEMP1.tsv TEMP.tsv
+done
+cat header.txt TEMP.tsv > ALL_SAMP.${pat}.DISC.read_count.tsv
+done
+```
+
+ # Correspond NGS ILs with ILs in DVS 
+
+```bash
+for N in {1..32}; do
+
+# Intact DVS TE member : chr1A:start-end
+bedtools sort -i NEW${N}_INTACT_COPIES.EXT10.bed | bedtools merge -i - | \
+awk '{print $1"\t"$2"\t"$3"\t"$1":"$2+10"-"$3-10}' > TE${N}_INTACT.EXT10.bed
+
+# Unintact DVS TE member : chr1A|start-end
+bedtools intersect -v -a NEW${N}_UNINTACT_COPIES.bed -b TE${N}_INTACT.EXT10.bed **| \**
+awk '{print $1"\t"$2-10"\t"$3+10"\t"$1"|"$2"-"$3}' > TE${N}_UNINTACT_EXT10.bed
+
+cat TE${N}_INTACT.EXT10.bed TE${N}_UNINTACT_EXT10.bed | \
+bedtools sort -i - > TE${N}_DVS.INTACT_UNINTACT.bed 
+
+bedtools intersect -wao -a ALL_TE${N}.2SPLIT_SUP.bed -b TE${N}_DVS.INTACT_UNINTACT.bed | \
+awk '$7=="." {print $1"\t"$2"\t"$3"\tNOT_DVS"} $7!="." {print $1"\t"$2"\t"$3"\t"$7}' \
+> ALL_TE${N}.2SPLIT_SUP.DVS.bed
+
+done
+
+for TE in TE{1..32}; do
+awk '{print $1":"$2"-"$3"\t"$4}' ALL_${TE}.2SPLIT_SUP.DVS.bed > ALL_${TE}.2SPLIT_SUP.DVS.tsv
+done
+
+```
+
+### # Content of SUM_SPLIT_DISC_COUNT.py
+
+```python
+#!/usr/bin/env python3
+
+import pandas as pd
+import sys
+
+TE=sys.argv[1]
+SPLIT=pd.read_table(f'ALL_SAMP.{TE}.SPLIT.read_count.tsv', header=0)
+SPLIT.drop('Unnamed: 232', axis=1, inplace=True)
+DISC=pd.read_table(f'ALL_SAMP.{TE}.DISC.read_count.tsv', header=0)
+DISC.drop('Unnamed: 232', axis=1, inplace=True)
+
+SPLIT.set_index(['chr', 'Left', 'Right'], inplace=True)
+DISC.set_index(['chr','Left','Right'], inplace=True)
+
+SUM=SPLIT+DISC
+SUM.reset_index().to_csv(f'ALL_SAMP.{TE}.SPLIT_DISC_SUM.read_count.tsv', sep="\t", header=True, index=False)
+
+SUM.where(SUM > 1, 0, inplace=True)
+SUM.where(SUM < 2, 1, inplace=True)
+SPLIT.where(SPLIT <1, 1, inplace=True)
+GENOTYPE = SUM + SPLIT
+GENOTYPE.where(GENOTYPE > 1, 0, inplace=True)
+GENOTYPE.where(GENOTYPE < 2, 1, inplace=True)
+GENOTYPE = GENOTYPE.reset_index()
+GENOTYPE['name']=GENOTYPE['chr']+":"+GENOTYPE['Left'].astype(str)+"-"+GENOTYPE['Right'].astype(str)
+GENOTYPE.drop(['chr', 'Left', 'Right'], axis = 1, inplace = True)
+GENOTYPE.to_csv(f'{TE}_NEW_GENOTYPE.tsv', sep="\t", header=True, index=False)
+```
+
+### # Sum split and disc read count matrix
+
+```bash
+for TE in TE{1..32} ; do
+./SUM_SPLIT_DISC_COUNT.py $TE
+done
+```
+
+### Mutant-type cell ratio analysis
+
+```bash
+# Output all TE ILs in the DVS reference genome
+for N in {1..32} ; do
+awk '$4=="PLUS" {print $2"\t"$3-11"\t"$3-1} $4=="MINUS" {print $2"\t"$3"\t"$3+10}' /zfs/socbd/bwu4/YU/annotation/FOUR_TE/TE_IN_CITRUS_GENOMES/SWO/NEW${N}_PRE_LEFT.tsv >> DVS_TE${N}.bed
+awk '$4=="PLUS" {print $2"\t"$3"\t"$3+10} $4=="MINUS" {print $2"\t"$3-11"\t"$3-1}' /zfs/socbd/bwu4/YU/annotation/FOUR_TE/TE_IN_CITRUS_GENOMES/SWO/NEW${N}_PRE_RIGHT.tsv >> DVS_TE${N}.bed
+done
+```
+
+ # Calculate wild-type reads mapped on ILs
+
+```bash
+for TE in TE{1..32} ; do
+for SAMP in $( cat ALL0510.txt ); do
+rm -f ${SAMP}_${TE}.W_count.tsv
+for IL in $( cat ${SAMP}_${TE}_IL.txt ); do
+ILEXT=$( echo $IL | awk '{match($0,/(chr[1-9AB]+):([0-9]+)-([0-9]+)$/,a); print a[1]":"a[2]-1001"-"a[3]+1000}' )
+W=$( samtools view -q 1 -f 66 ${SAMP}.TE_05082022.srt.bam $ILEXT | grep -v Mu | grep -v TE | \
+awk -v x=$IL '{match(x,/:([0-9]+)-([0-9]+)/,a); match($6,/([0-9]+)M/,b); match($0,/MC:Z:([0-9]+[SH])?([0-9]+)M/,c)} 
+( $4<=a[1]-40 && $8+c[2]>=a[2]+40) || ($8<=a[1]-40 && $4+b[1]>=a[2]+40) {print $0}' | wc -l )
+echo -e ${IL}"\t"${W} >> ${SAMP}_${TE}.W_count.tsv
+done
+touch ${SAMP}_${TE}.W_count.tsv
+done
+done
+
+# Check if W count results are intact
+for TE in TE{1..32} ; do
+for SAMP in $( cat ALL0510.txt ); do
+a=$( wc -l ${SAMP}_${TE}_IL.txt | cut -d " " -f 1 )
+b=$( wc -l ${SAMP}_${TE}.W_count.tsv | cut -d " " -f 1 )
+c=$( wc -l ${SAMP}_${TE}.MASK_W_count.tsv | cut -d " " -f 1 )
+if [[ ! a -eq b ]]; then
+rm -f ${SAMP}_${TE}.W_count.tsv
+for IL in $( cat ${SAMP}_${TE}_IL.txt ); do
+ILEXT=$( echo $IL | awk '{match($0,/(chr[1-9AB]+):([0-9]+)-([0-9]+)$/,a); print a[1]":"a[2]-1001"-"a[3]+1000}' )
+W=$( samtools view -q 1 -f 66 ${SAMP}.TE_05082022.srt.bam $ILEXT | grep -v Mu | grep -v TE | \
+awk -v x=$IL '{match(x,/:([0-9]+)-([0-9]+)/,a); match($6,/([0-9]+)M/,b); match($0,/MC:Z:([0-9]+[SH])?([0-9]+)M/,c)} 
+( $4<=a[1]-40 && $8+c[2]>=a[2]+40) || ($8<=a[1]-40 && $4+b[1]>=a[2]+40) {print $0}' | wc -l )
+echo -e ${IL}"\t"${W} >> ${SAMP}_${TE}.W_count.tsv
+done
+fi
+if [[ ! a -eq c ]]; then
+cat ${SAMP}_${TE}_A_IL_BMASKED.bed | \
+awk '$2>=1000 {print $1"\t"$2-1000"\t"$3+1000} $2<1000 {print $1"\t0\t"$3+1000}' | \
+bedtools sort -i - > ${SAMP}_${TE}_A_IL_BMASKED.region
+samtools view -h -@ 8 -L ${SAMP}_${TE}_A_IL_BMASKED.region ${SAMP}.TE_05082022.srt.bam | \
+samtools fastq -1 ${SAMP}_${TE}.TMP_MASK_1.fq -2 ${SAMP}_${TE}.TMP_MASK_2.fq
+grep "@" ${SAMP}_${TE}.TMP_MASK_1.fq | sort > ${SAMP}_${TE}.TMP_MASK_1.id
+grep "@" ${SAMP}_${TE}.TMP_MASK_2.fq | sort > ${SAMP}_${TE}.TMP_MASK_2.id
+comm -1 -2 ${SAMP}_${TE}.TMP_MASK_1.id ${SAMP}_${TE}.TMP_MASK_2.id > ${SAMP}_${TE}.TMP_MASK_12.id
+sed -i 's/@//g' ${SAMP}_${TE}.TMP_MASK_12.id
+seqtk subseq ${SAMP}_${TE}.TMP_MASK_1.fq ${SAMP}_${TE}.TMP_MASK_12.id | paste - - - - | \
+sort -k1,1 -S 3G | tr '\t' '\n' > ${SAMP}_${TE}.PAIRED.TMP_MASK_1.fq
+seqtk subseq ${SAMP}_${TE}.TMP_MASK_2.fq ${SAMP}_${TE}.TMP_MASK_12.id | paste - - - - | \
+sort -k1,1 -S 3G | tr '\t' '\n' > ${SAMP}_${TE}.PAIRED.TMP_MASK_2.fq
+bwa mem -t 7 DVSA_TE.05122022.fasta ${SAMP}_${TE}.PAIRED.TMP_MASK_1.fq \
+${SAMP}_${TE}.PAIRED.TMP_MASK_2.fq | samtools sort -o ${SAMP}_${TE}.PAIRED.TMP_MASK.bam
+samtools index ${SAMP}_${TE}.PAIRED.TMP_MASK.bam
+rm -f ${SAMP}_${TE}.MASK_W_count.tsv
+for IL in $( cat ${SAMP}_${TE}_IL.txt ); do
+if [[ ${IL} == *"A"* ]]; then
+W=$( samtools view -q 1 -f 66 ${SAMP}_${TE}.PAIRED.TMP_MASK.bam $IL | \
+grep -v TE | grep -v Mu | \
+awk -v x=$IL '{match(x,/:([0-9]+)-([0-9]+)/,a); match($6,/([0-9]+)M/,b); 
+match($0,/MC:Z:([0-9]+[SH])?([0-9]+)M/,c)} ( $4<=a[1]-40 && $8+c[2]>=a[2]+40) || ($8<=a[1]-40 && $4+b[1]>=a[2]+40) {print $0}' | wc -l )
+echo -e ${IL}"\t"${W} >> ${SAMP}_${TE}.MASK_W_count.tsv
+fi
+done
+rm -f ${SAMP}_${TE}.TMP_MASK_1.fq 
+rm -f ${SAMP}_${TE}.TMP_MASK_2.fq
+rm -f ${SAMP}_${TE}.PAIRED.TMP_MASK.bam*
+cat ${SAMP}_${TE}_B_IL_AMASKED.bed | \
+awk '$2>=1000 {print $1"\t"$2-1000"\t"$3+1000} $2<1000 {print $1"\t0\t"$3+1000}' | \
+bedtools sort -i - > ${SAMP}_${TE}_B_IL_AMASKED.region
+samtools view -h -@ 8 -L ${SAMP}_${TE}_B_IL_AMASKED.region ${SAMP}.TE_05082022.srt.bam | \
+samtools fastq -1 ${SAMP}_${TE}.TMP_MASK_1.fq -2 ${SAMP}_${TE}.TMP_MASK_2.fq
+grep "@" ${SAMP}_${TE}.TMP_MASK_1.fq | sort > ${SAMP}_${TE}.TMP_MASK_1.id
+grep "@" ${SAMP}_${TE}.TMP_MASK_2.fq | sort > ${SAMP}_${TE}.TMP_MASK_2.id
+comm -1 -2 ${SAMP}_${TE}.TMP_MASK_1.id ${SAMP}_${TE}.TMP_MASK_2.id > ${SAMP}_${TE}.TMP_MASK_12.id
+sed -i 's/@//g' ${SAMP}_${TE}.TMP_MASK_12.id
+seqtk subseq ${SAMP}_${TE}.TMP_MASK_1.fq ${SAMP}_${TE}.TMP_MASK_12.id | paste - - - - | \
+sort -k1,1 -S 3G | tr '\t' '\n' > ${SAMP}_${TE}.PAIRED.TMP_MASK_1.fq
+seqtk subseq ${SAMP}_${TE}.TMP_MASK_2.fq ${SAMP}_${TE}.TMP_MASK_12.id | paste - - - - | \
+sort -k1,1 -S 3G | tr '\t' '\n' > ${SAMP}_${TE}.PAIRED.TMP_MASK_2.fq
+bwa mem -t 7 DVSB_TE.05122022.fasta ${SAMP}_${TE}.PAIRED.TMP_MASK_1.fq \
+${SAMP}_${TE}.PAIRED.TMP_MASK_2.fq | samtools sort -o ${SAMP}_${TE}.PAIRED.TMP_MASK.bam
+samtools index ${SAMP}_${TE}.PAIRED.TMP_MASK.bam
+for IL in $( cat ${SAMP}_${TE}_IL.txt ); do
+if [[ ${IL} == *"B"* ]]; then
+W=$( samtools view -q 1 -f 66 ${SAMP}_${TE}.PAIRED.TMP_MASK.bam $IL | \
+grep -v TE | grep -v Mu | \
+awk -v x=$IL '{match(x,/:([0-9]+)-([0-9]+)/,a); match($6,/([0-9]+)M/,b); 
+match($0,/MC:Z:([0-9]+[SH])?([0-9]+)M/,c)} ( $4<=a[1]-40 && $8+c[2]>=a[2]+40) || ($8<=a[1]-40 && $4+b[1]>=a[2]+40) {print $0}' | wc -l )
+echo -e ${IL}"\t"${W} >> ${SAMP}_${TE}.MASK_W_count.tsv
+fi
+done
+fi
+done
+done
+```
+
+ # Deal with reads mapped to partially masked regions
+
+```bash
+# Add masked intact and non-intact MULE regions in DVS_MU.bed
+# Sort the DVS_TE.bed file
+for N in {1..32} ; do
+bedtools sort -i DVS_TE${N}.bed > DVS_TE${N}.srt.bed
+done
+
+# Remove DVS ILs from all the scanned ILs
+for N in {1..32} ; do
+bedtools intersect -v -wa -a ALL_TE${N}.2SPLIT_SUP.bed \
+-b DVS_TE${N}.srt.bed > ALL_TE${N}.2SPLIT_SUP.nonDVS.bed
+done
+
+# Output surrounding 1000 bp sequences of filtered ILs and separate those on DVS_A and DVS_B
+for N in {1..32} ; do
+awk '$1~/A/ {print $1"\t"$2-500"\t"$3+500}' ALL_TE${N}.2SPLIT_SUP.nonDVS.bed \
+> ALL_TE${N}.2SPLIT_SUP.nonDVS.chrA.SURR500.bed
+awk '$1~/B/ {print $1"\t"$2-500"\t"$3+500}' ALL_TE${N}.2SPLIT_SUP.nonDVS.bed \
+> ALL_TE${N}.2SPLIT_SUP.nonDVS.chrB.SURR500.bed
+done
+
+# Output surrounding 1000 bp sequences of filtered ILs and separate those on DVS_A and DVS_B
+for N in {1..32} ; do
+awk '{print $1":"$2"-"$3"\t"$1":"$2-500"-"$3+500}' ALL_TE${N}.2SPLIT_SUP.nonDVS.bed \
+> TE${N}_IL_ILSURROUNDING.tsv
+done
+
+# Map the surrounding sequences of DVS_A ILs to unmasked DVS_B to check if their allelic regions are 
+# masked in the modified DVS reference genome
+for N in {1..32} ; do
+bedtools getfasta -fi /zfs/socbd/bwu4/YU/annotation/CK2021.60.corrected.fasta \
+-fo ALL_TE${N}.2SPLIT_SUP.nonDVS.chrA.SURR500.fasta \
+-bed ALL_TE${N}.2SPLIT_SUP.nonDVS.chrA.SURR500.bed
+bedtools getfasta -fi /zfs/socbd/bwu4/YU/annotation/CK2021.60.corrected.fasta \
+-fo ALL_TE${N}.2SPLIT_SUP.nonDVS.chrB.SURR500.fasta \
+-bed ALL_TE${N}.2SPLIT_SUP.nonDVS.chrB.SURR500.bed
+minimap2 -x asm20 -t 8 CK2021.60.corrected.B.fasta \
+ALL_TE${N}.2SPLIT_SUP.nonDVS.chrA.SURR500.fasta > ALL_TE${N}.chrA_IL_chrB_SURR500.paf
+minimap2 -x asm20 -t 8 CK2021.60.corrected.A.fasta \
+ALL_TE${N}.2SPLIT_SUP.nonDVS.chrB.SURR500.fasta > ALL_TE${N}.chrB_IL_chrA_SURR500.paf
+cat ALL_TE${N}.chrA_IL_chrB_SURR500.paf | \
+awk '$12>0 && $4-$3 > 200 {print $6"\t"$8"\t"$9"\t"$1}' > ALL_TE${N}.chrA_IL_SURR500_DVSB.bed
+cat ALL_TE${N}.chrB_IL_chrA_SURR500.paf | \
+awk '$12>0 && $4-$3 > 200 {print $6"\t"$8"\t"$9"\t"$1}' > ALL_TE${N}.chrB_IL_SURR500_DVSA.bed
+bedtools intersect -wo -a ALL_TE${N}.chrA_IL_SURR500_DVSB.bed \
+-b CK2021.0512_TE32_MU12_MASKED.bed > ALL_TE${N}.chrA_IL_SURR500_DVSB_MASKED.intersect.txt
+bedtools intersect -wo -a ALL_TE${N}.chrB_IL_SURR500_DVSA.bed \
+-b CK2021.0512_TE32_MU12_MASKED.bed > ALL_TE${N}.chrB_IL_SURR500_DVSA_MASKED.intersect.txt
+done
+
+for TE in TE{1..32}; do
+cut -f 1,2,3,4 ALL_${TE}.chrA_IL_SURR500_DVSB_MASKED.intersect.txt | \
+sort -u > ${TE}.A_IL_BMASKED.tsv
+cut -f 1,2,3,4 ALL_${TE}.chrB_IL_SURR500_DVSA_MASKED.intersect.txt | \
+sort -u > ${TE}.B_IL_AMASKED.tsv
+done
+
+# Prepare references including DVSA or DVSB and the modified transposon sequences
+cdbfasta CK2021.05072022.MASKED.fasta
+grep ">" CK2021.05072022.MASKED.fasta | grep -v B | sed "s/>//g" > DVSA_TE.05122022.gi
+cat DVSA_TE.05122022.gi | cdbyank CK2021.05072022.MASKED.fasta.cidx - > DVSA_TE.05122022.fasta
+bwa index DVSA_TE.05122022.fasta
+grep ">" CK2021.05072022.MASKED.fasta | grep -v A | sed "s/>//g" > DVSB_TE.05122022.gi
+cat DVSB_TE.05122022.gi | cdbyank CK2021.05072022.MASKED.fasta.cidx - > DVSB_TE.05122022.fasta
+bwa index DVSB_TE.05122022.fasta
+
+for TE in TE{1..32}; do
+for SAMP in $( cat ALL0510.txt ); do
+./FETCH_SAMP_ILS.py ${TE} $SAMP
+cat ${SAMP}_${TE}_A_IL_BMASKED.bed | \
+awk '$2>=1000 {print $1"\t"$2-1000"\t"$3+1000} $2<1000 {print $1"\t0\t"$3+1000}' | \
+bedtools sort -i - > ${SAMP}_${TE}_A_IL_BMASKED.region
+samtools view -h -@ 8 -L ${SAMP}_${TE}_A_IL_BMASKED.region ${SAMP}.TE_05082022.srt.bam | \
+samtools fastq -1 ${SAMP}_${TE}.TMP_MASK_1.fq -2 ${SAMP}_${TE}.TMP_MASK_2.fq
+grep "@" ${SAMP}_${TE}.TMP_MASK_1.fq | sort > ${SAMP}_${TE}.TMP_MASK_1.id
+grep "@" ${SAMP}_${TE}.TMP_MASK_2.fq | sort > ${SAMP}_${TE}.TMP_MASK_2.id
+comm -1 -2 ${SAMP}_${TE}.TMP_MASK_1.id ${SAMP}_${TE}.TMP_MASK_2.id > ${SAMP}_${TE}.TMP_MASK_12.id
+sed -i 's/@//g' ${SAMP}_${TE}.TMP_MASK_12.id
+seqtk subseq ${SAMP}_${TE}.TMP_MASK_1.fq ${SAMP}_${TE}.TMP_MASK_12.id | paste - - - - | \
+sort -k1,1 -S 3G | tr '\t' '\n' > ${SAMP}_${TE}.PAIRED.TMP_MASK_1.fq
+seqtk subseq ${SAMP}_${TE}.TMP_MASK_2.fq ${SAMP}_${TE}.TMP_MASK_12.id | paste - - - - | \
+sort -k1,1 -S 3G | tr '\t' '\n' > ${SAMP}_${TE}.PAIRED.TMP_MASK_2.fq
+bwa mem -t 7 DVSA_TE.05122022.fasta ${SAMP}_${TE}.PAIRED.TMP_MASK_1.fq \
+${SAMP}_${TE}.PAIRED.TMP_MASK_2.fq | samtools sort -o ${SAMP}_${TE}.PAIRED.TMP_MASK.bam
+samtools index ${SAMP}_${TE}.PAIRED.TMP_MASK.bam
+rm -f ${SAMP}_${TE}.MASK_W_count.tsv
+for IL in $( cat ${SAMP}_${TE}_IL.txt ); do
+if [[ ${IL} == *"A"* ]]; then
+W=$( samtools view -q 1 -f 66 ${SAMP}_${TE}.PAIRED.TMP_MASK.bam $IL | \
+grep -v TE | grep -v Mu | \
+awk -v x=$IL '{match(x,/:([0-9]+)-([0-9]+)/,a); match($6,/([0-9]+)M/,b); 
+match($0,/MC:Z:([0-9]+[SH])?([0-9]+)M/,c)} ( $4<=a[1]-40 && $8+c[2]>=a[2]+40) || ($8<=a[1]-40 && $4+b[1]>=a[2]+40) {print $0}' | wc -l )
+echo -e ${IL}"\t"${W} >> ${SAMP}_${TE}.MASK_W_count.tsv
+fi
+done
+rm -f ${SAMP}_${TE}.TMP_MASK_1.fq 
+rm -f ${SAMP}_${TE}.TMP_MASK_2.fq
+rm -f ${SAMP}_${TE}.PAIRED.TMP_MASK.bam*
+cat ${SAMP}_${TE}_B_IL_AMASKED.bed | \
+awk '$2>=1000 {print $1"\t"$2-1000"\t"$3+1000} $2<1000 {print $1"\t0\t"$3+1000}' | \
+bedtools sort -i - > ${SAMP}_${TE}_B_IL_AMASKED.region
+samtools view -h -@ 8 -L ${SAMP}_${TE}_B_IL_AMASKED.region ${SAMP}.TE_05082022.srt.bam | \
+samtools fastq -1 ${SAMP}_${TE}.TMP_MASK_1.fq -2 ${SAMP}_${TE}.TMP_MASK_2.fq
+grep "@" ${SAMP}_${TE}.TMP_MASK_1.fq | sort > ${SAMP}_${TE}.TMP_MASK_1.id
+grep "@" ${SAMP}_${TE}.TMP_MASK_2.fq | sort > ${SAMP}_${TE}.TMP_MASK_2.id
+comm -1 -2 ${SAMP}_${TE}.TMP_MASK_1.id ${SAMP}_${TE}.TMP_MASK_2.id > ${SAMP}_${TE}.TMP_MASK_12.id
+sed -i 's/@//g' ${SAMP}_${TE}.TMP_MASK_12.id
+seqtk subseq ${SAMP}_${TE}.TMP_MASK_1.fq ${SAMP}_${TE}.TMP_MASK_12.id | paste - - - - | \
+sort -k1,1 -S 3G | tr '\t' '\n' > ${SAMP}_${TE}.PAIRED.TMP_MASK_1.fq
+seqtk subseq ${SAMP}_${TE}.TMP_MASK_2.fq ${SAMP}_${TE}.TMP_MASK_12.id | paste - - - - | \
+sort -k1,1 -S 3G | tr '\t' '\n' > ${SAMP}_${TE}.PAIRED.TMP_MASK_2.fq
+bwa mem -t 7 DVSB_TE.05122022.fasta ${SAMP}_${TE}.PAIRED.TMP_MASK_1.fq \
+${SAMP}_${TE}.PAIRED.TMP_MASK_2.fq | samtools sort -o ${SAMP}_${TE}.PAIRED.TMP_MASK.bam
+samtools index ${SAMP}_${TE}.PAIRED.TMP_MASK.bam
+for IL in $( cat ${SAMP}_${TE}_IL.txt ); do
+if [[ ${IL} == *"B"* ]]; then
+W=$( samtools view -q 1 -f 66 ${SAMP}_${TE}.PAIRED.TMP_MASK.bam $IL | \
+grep -v TE | grep -v Mu | \
+awk -v x=$IL '{match(x,/:([0-9]+)-([0-9]+)/,a); match($6,/([0-9]+)M/,b); 
+match($0,/MC:Z:([0-9]+[SH])?([0-9]+)M/,c)} ( $4<=a[1]-40 && $8+c[2]>=a[2]+40) || ($8<=a[1]-40 && $4+b[1]>=a[2]+40) {print $0}' | wc -l )
+echo -e ${IL}"\t"${W} >> ${SAMP}_${TE}.MASK_W_count.tsv
+fi
+done
+done
+done
+```
+
+### # FETCH_SAMP_ILS.py content
+
+```python
+#!/usr/bin/env python3
+
+import pandas as pd
+import sys
+
+TE = sys.argv[1] # TE name
+SAMP = sys.argv[2] # Sample name in the genotype table
+GTDF = pd.read_table(f'{TE}_GENOTYPE.tsv', header=0)
+GTDF.loc[GTDF[SAMP]==1,'name'].to_csv(f'{SAMP}_{TE}_IL.txt',header=False,index=False)
+ID_CONVER = pd.read_table(f'{TE}_IL_ILSURROUNDING.tsv',names=['name','surr'])
+
+A_IL = pd.read_table(f'{TE}.A_IL_BMASKED.tsv',names=['chr','Left','Right','surr'])
+A_IL = A_IL.merge(ID_CONVER,on='surr')
+A_IL.loc[A_IL['name'].isin(GTDF.loc[GTDF[SAMP]==1,'name']),['chr','Left','Right']].to_csv(f'{SAMP}_{TE}_A_IL_BMASKED.bed',sep="\t",header=False,index=False)
+A_IL.loc[A_IL['name'].isin(GTDF.loc[GTDF[SAMP]==1,'name']),['surr']].to_csv(f'{SAMP}_{TE}_A_IL_SURR.bed',header=False,index=False)
+
+B_IL = pd.read_table(f'{TE}.B_IL_AMASKED.tsv',names=['chr','Left','Right','surr'])
+ID_CONVER = pd.read_table(f'{TE}_IL_ILSURROUNDING.tsv',names=['name','surr'])
+B_IL = B_IL.merge(ID_CONVER,on='surr')
+B_IL.loc[B_IL['name'].isin(GTDF.loc[GTDF[SAMP]==1,'name']),['chr','Left','Right']].to_csv(f'{SAMP}_{TE}_B_IL_AMASKED.bed',sep="\t",header=False,index=False)
+B_IL.loc[B_IL['name'].isin(GTDF.loc[GTDF[SAMP]==1,'name']),['surr']].to_csv(f'{SAMP}_{TE}_B_IL_SURR.bed',header=False,index=False)
+```
+
+ ### Count wild-type reads mapped to the partially masked allelic regions  for PRECISE_ILs not detected by the old method
+
+```bash
+# Screen for the Precise ILs without wild-type read count statistics in previsous analysis
+for TE in TE{1..32}; do
+cut -f 1,2 GENOTYPE/${TE}_0529_GENOTYPE.tsv | awk 'NR>1 && $2~/DVS/' | \
+sed "s/:/\t/g;s/-/\t/g" | awk '{print $1"\t"$2"\t"$3"\t"$1":"$2"-"$3}' \
+> GENOTYPE/${TE}_0529_GENOTYPE_NONDVS.bed
+
+awk 'NR>1 {print $230}' GENOTYPE/${TE}_GENOTYPE.tsv | \
+sed "s/:/\t/g;s/-/\t/g" | awk '{print $1"\t"$2"\t"$3"\t"$1":"$2"-"$3}' \
+> GENOTYPE/${TE}_GENOTYPE.bed
+
+bedtools intersect -v -a GENOTYPE/${TE}_0529_GENOTYPE_NONDVS.bed \
+-b GENOTYPE/${TE}_GENOTYPE.bed > TEMP/${TE}_0529_GENOTYPE_NONDVS_LEFT_TMP.bed 
+done
+
+# Output surrounding 1000 bp sequences of rest non-DVS ILs and separate those on DVS_A and DVS_B
+for N in {1..32} ; do
+awk '$1~/A/ {print $1"\t"$2-500"\t"$3+500}' TEMP/TE${N}_0529_GENOTYPE_NONDVS_LEFT_TMP.bed \
+> TEMP/TE${N}_0529_GENOTYPE_NONDVS_LEFT_TMP.chrA.SURR500.bed
+awk '$1~/B/ {print $1"\t"$2-500"\t"$3+500}' TEMP/TE${N}_0529_GENOTYPE_NONDVS_LEFT_TMP.bed \
+> TEMP/TE${N}_0529_GENOTYPE_NONDVS_LEFT_TMP.chrB.SURR500.bed
+done
+
+# Output surrounding 1000 bp sequences of filtered ILs and separate those on DVS_A and DVS_B
+for N in {1..32} ; do
+awk '{print $1":"$2"-"$3"\t"$1":"$2-500"-"$3+500}' TEMP/TE${N}_0529_GENOTYPE_NONDVS_LEFT_TMP.bed \
+> TEMP/TE${N}_IL_ILSURROUNDING_TMP.tsv
+done
+
+# Map the surrounding sequences of DVS_A ILs to unmasked DVS_B to check if their allelic regions are 
+# masked in the modified DVS reference genome
+for N in {1..32} ; do
+bedtools getfasta -fi /zfs/socbd/bwu4/YU/annotation/CK2021.60.corrected.fasta \
+-fo TEMP/TE${N}_0529_GENOTYPE_NONDVS_LEFT_TMP.chrA.SURR500.fasta \
+-bed TEMP/TE${N}_0529_GENOTYPE_NONDVS_LEFT_TMP.chrA.SURR500.bed
+bedtools getfasta -fi /zfs/socbd/bwu4/YU/annotation/CK2021.60.corrected.fasta \
+-fo TEMP/TE${N}_0529_GENOTYPE_NONDVS_LEFT_TMP.chrB.SURR500.fasta \
+-bed TEMP/TE${N}_0529_GENOTYPE_NONDVS_LEFT_TMP.chrB.SURR500.bed
+minimap2 -x asm20 -t 8 CK2021.60.corrected.B.fasta \
+TEMP/TE${N}_0529_GENOTYPE_NONDVS_LEFT_TMP.chrA.SURR500.fasta > TEMP/TE${N}_REST.chrA_IL_chrB_SURR500_TMP.paf
+minimap2 -x asm20 -t 8 CK2021.60.corrected.A.fasta \
+TEMP/TE${N}_0529_GENOTYPE_NONDVS_LEFT_TMP.chrB.SURR500.fasta > TEMP/TE${N}_REST.chrB_IL_chrA_SURR500_TMP.paf
+cat TEMP/TE${N}_REST.chrA_IL_chrB_SURR500_TMP.paf | \
+awk '$12>0 && $4-$3 > 200 {print $6"\t"$8"\t"$9"\t"$1}' > TEMP/TE${N}_REST.chrA_IL_SURR500_DVSB_TMP.bed
+cat TEMP/TE${N}_REST.chrB_IL_chrA_SURR500_TMP.paf | \
+awk '$12>0 && $4-$3 > 200 {print $6"\t"$8"\t"$9"\t"$1}' > TEMP/TE${N}_REST.chrB_IL_SURR500_DVSA_TMP.bed
+bedtools intersect -wo -a TEMP/TE${N}_REST.chrA_IL_SURR500_DVSB_TMP.bed \
+-b CK2021.0512_TE32_MU12_MASKED.bed > TEMP/TE${N}_REST.chrA_IL_SURR500_DVSB_MASKED.intersect.txt
+bedtools intersect -wo -a TEMP/TE${N}_REST.chrB_IL_SURR500_DVSA_TMP.bed \
+-b CK2021.0512_TE32_MU12_MASKED.bed > TEMP/TE${N}_REST.chrB_IL_SURR500_DVSA_MASKED.intersect.txt
+done
+
+for N in {1..32}; do
+cut -f 1,2,3,4 TEMP/TE${N}_REST.chrA_IL_SURR500_DVSB_MASKED.intersect.txt | \
+sort -u > TE${N}_REST.A_IL_BMASKED.tsv
+cut -f 1,2,3,4 TEMP/TE${N}_REST.chrB_IL_SURR500_DVSA_MASKED.intersect.txt | \
+sort -u > TE${N}_REST.B_IL_AMASKED.tsv
+done
+
+for SAMP in $( cat ALL0510.txt ); do
+for TE in TE{1..32} ;do
+./NEW_FETCH_SAMP_ILS.py $TE $SAMP
+done
+deon
+
+for SAMP in $( cat ALL0510.txt ); do
+sed "s/SAMP/${SAMP}/g" TEMPLATE_MASK_W_COUNT.pbs > ${SAMP}_MASK_W_COUNT.pbs
+qsub ${SAMP}_MASK_W_COUNT.pbs
+done
+
+```
+
+### # Content of MASK_W_COUNT.sh
+
+```bash
+#!/bin/bash
+
+SAMP=$1
+THREADS=7
+for TE in TE{1..32}; do
+cat TEMP/A_IL_BMASKED/${SAMP}_${TE}_REST_A_IL_BMASKED.bed | \
+awk '$2>=500 {print $1"\t"$2-500"\t"$3+500} $2<500 {print $1"\t0\t"$3+500}' | \
+bedtools sort -i - > ${SAMP}_${TE}.REST_A_IL_BMASKED_TMP.region
+samtools view -h -q 1 -@ $THREADS -L ${SAMP}_${TE}.REST_A_IL_BMASKED_TMP.region BAM/${SAMP}.TE_05082022.srt.bam | \
+samtools fastq -1 ${SAMP}_${TE}.TMP_MASK_1.fq -2 ${SAMP}_${TE}.TMP_MASK_2.fq
+grep "@" ${SAMP}_${TE}.TMP_MASK_1.fq | sort > ${SAMP}_${TE}.TMP_MASK_1.id
+grep "@" ${SAMP}_${TE}.TMP_MASK_2.fq | sort > ${SAMP}_${TE}.TMP_MASK_2.id
+comm -1 -2 ${SAMP}_${TE}.TMP_MASK_1.id ${SAMP}_${TE}.TMP_MASK_2.id > ${SAMP}_${TE}.TMP_MASK_12.id
+sed -i 's/@//g' ${SAMP}_${TE}.TMP_MASK_12.id
+seqtk subseq ${SAMP}_${TE}.TMP_MASK_1.fq ${SAMP}_${TE}.TMP_MASK_12.id | paste - - - - | \
+sort -k1,1 -S 3G | tr '\t' '\n' > ${SAMP}_${TE}.PAIRED.TMP_MASK_1.fq
+seqtk subseq ${SAMP}_${TE}.TMP_MASK_2.fq ${SAMP}_${TE}.TMP_MASK_12.id | paste - - - - | \
+sort -k1,1 -S 3G | tr '\t' '\n' > ${SAMP}_${TE}.PAIRED.TMP_MASK_2.fq
+bwa mem -t ${THREADS} DVSA_TE.05122022.fasta ${SAMP}_${TE}.PAIRED.TMP_MASK_1.fq \
+${SAMP}_${TE}.PAIRED.TMP_MASK_2.fq | samtools sort -o ${SAMP}_${TE}.PAIRED.TMP_MASK.bam
+samtools index -@ $THREADS ${SAMP}_${TE}.PAIRED.TMP_MASK.bam
+rm -f ${SAMP}_${TE}_REST.MASK_W_count.tsv
+touch ${SAMP}_${TE}_REST.MASK_W_count.tsv
+for IL in $( cat TEMP/${SAMP}_${TE}_REST_NONDVS_IL.txt ); do
+if [[ ${IL} == *"A"* ]]; then
+W=$( samtools view -q 1 -f 66 ${SAMP}_${TE}.PAIRED.TMP_MASK.bam $IL | \
+grep -v TE | grep -v Mu | \
+awk -v x=$IL '{match(x,/:([0-9]+)-([0-9]+)/,a); match($6,/([0-9]+)M/,b); 
+match($0,/MC:Z:([0-9]+[SH])?([0-9]+)M/,c)} ( $4<=a[1]-40 && $8+c[2]>=a[2]+40) || ($8<=a[1]-40 && $4+b[1]>=a[2]+40) {print $0}' | wc -l )
+echo -e ${IL}"\t"${W} >> ${SAMP}_${TE}_REST.MASK_W_count.tsv
+fi
+done
+rm -f ${SAMP}_${TE}.*TMP* 
+cat TEMP/B_IL_AMASKED/${SAMP}_${TE}_REST_B_IL_AMASKED.bed | \
+awk '$2>=500 {print $1"\t"$2-500"\t"$3+1000} $2<500 {print $1"\t0\t"$3+500}' | \
+bedtools sort -i - > ${SAMP}_${TE}.B_IL_AMASKED_TMP.region
+samtools view -h -q 1 -@ ${THREADS} -L ${SAMP}_${TE}.B_IL_AMASKED_TMP.region BAM/${SAMP}.TE_05082022.srt.bam | \
+samtools fastq -1 ${SAMP}_${TE}.TMP_MASK_1.fq -2 ${SAMP}_${TE}.TMP_MASK_2.fq
+grep "@" ${SAMP}_${TE}.TMP_MASK_1.fq | sort > ${SAMP}_${TE}.TMP_MASK_1.id
+grep "@" ${SAMP}_${TE}.TMP_MASK_2.fq | sort > ${SAMP}_${TE}.TMP_MASK_2.id
+comm -1 -2 ${SAMP}_${TE}.TMP_MASK_1.id ${SAMP}_${TE}.TMP_MASK_2.id > ${SAMP}_${TE}.TMP_MASK_12.id
+sed -i 's/@//g' ${SAMP}_${TE}.TMP_MASK_12.id
+seqtk subseq ${SAMP}_${TE}.TMP_MASK_1.fq ${SAMP}_${TE}.TMP_MASK_12.id | paste - - - - | \
+sort -k1,1 -S 3G | tr '\t' '\n' > ${SAMP}_${TE}.PAIRED.TMP_MASK_1.fq
+seqtk subseq ${SAMP}_${TE}.TMP_MASK_2.fq ${SAMP}_${TE}.TMP_MASK_12.id | paste - - - - | \
+sort -k1,1 -S 3G | tr '\t' '\n' > ${SAMP}_${TE}.PAIRED.TMP_MASK_2.fq
+bwa mem -t ${THREADS} DVSB_TE.05122022.fasta ${SAMP}_${TE}.PAIRED.TMP_MASK_1.fq \
+${SAMP}_${TE}.PAIRED.TMP_MASK_2.fq | samtools sort -o ${SAMP}_${TE}.PAIRED.TMP_MASK.bam
+samtools index -@ ${THREADS} ${SAMP}_${TE}.PAIRED.TMP_MASK.bam
+for IL in $( cat TEMP/${SAMP}_${TE}_REST_NONDVS_IL.txt ); do
+if [[ ${IL} == *"B"* ]]; then
+W=$( samtools view -q 1 -f 66 ${SAMP}_${TE}.PAIRED.TMP_MASK.bam $IL | \
+grep -v TE | grep -v Mu | \
+awk -v x=$IL '{match(x,/:([0-9]+)-([0-9]+)/,a); match($6,/([0-9]+)M/,b); 
+match($0,/MC:Z:([0-9]+[SH])?([0-9]+)M/,c)} ( $4<=a[1]-40 && $8+c[2]>=a[2]+40) || ($8<=a[1]-40 && $4+b[1]>=a[2]+40) {print $0}' | wc -l )
+echo -e ${IL}"\t"${W} >> ${SAMP}_${TE}_REST.MASK_W_count.tsv
+fi
+done
+rm -f ${SAMP}_${TE}.*TMP* 
+done
+
+```
+
+### # Content of W_COUNT.sh
+
+```bash
+#!/bin/bash
+SAMP=$1
+THREADS=$2
+for TE in TE{1..32} ; do
+rm -f ${SAMP}_${TE}_REST.W_count.tsv
+touch ${SAMP}_${TE}_REST.W_count.tsv
+for IL in $( cat TEMP/${SAMP}_${TE}_REST_NONDVS_IL.txt ); do
+ILEXT=$( echo $IL | awk '{match($0,/(chr[1-9AB]+):([0-9]+)-([0-9]+)$/,a); print a[1]":"a[2]-1001"-"a[3]+1000}' )
+W=$( samtools view -@ ${THREADS} -q 1 -f 66 BAM/${SAMP}.TE_05082022.srt.bam $ILEXT | grep -v Mu | grep -v TE | \
+awk -v x=$IL '{match(x,/:([0-9]+)-([0-9]+)/,a); match($6,/([0-9]+)M/,b); match($0,/MC:Z:([0-9]+[SH])?([0-9]+)M/,c)} 
+( $4<=a[1]-40 && $8+c[2]>=a[2]+40) || ($8<=a[1]-40 && $4+b[1]>=a[2]+40) {print $0}' | wc -l )
+echo -e ${IL}"\t"${W} >> ${SAMP}_${TE}_REST.W_count.tsv
+done
+done
+
+```
+
+### # Content of TEMPLATE_MASK_W_COUNT.pbs
+
+```bash
+#PBS -N SAMP
+#PBS -l select=1:ncpus=8:mem=30gb:interconnect=1g,walltime=168:00:00
+#PBS -j oe
+
+source ~/.bashrc
+cd /scratch1/bwu4/TE_SCAN
+./MASK_W_COUNT.sh SAMP
+```
+
+### # NEW_FETCH_SAMP_ILS.py content
+
+```python
+#!/usr/bin/env python3
+
+import pandas as pd
+import sys
+
+TE = sys.argv[1] # TE name
+SAMP = sys.argv[2] # Sample name in the genotype table
+GTDF = pd.read_table(f'GENOTYPE/{TE}_0529_GENOTYPE.tsv', header=0)
+REST = pd.read_table(f'TEMP/{TE}_0529_GENOTYPE_NONDVS_LEFT_TMP.bed',names=['CHR','START','END','name'], header=None)
+REST = REST.loc[REST['name'].str.contains('chr')].copy()
+GTDF = GTDF.loc[(GTDF[SAMP]==1) & (GTDF['name'].isin(REST['name']))]
+GTDF['name'].to_csv(f'TEMP/{SAMP}_{TE}_REST_NONDVS_IL.txt',header=False,index=False)
+ID_CONVER = pd.read_table(f'TEMP/{TE}_IL_ILSURROUNDING_TMP.tsv',names=['name','surr'])
+
+A_IL = pd.read_table(f'{TE}_REST.A_IL_BMASKED.tsv',names=['chr','Left','Right','surr'])
+A_IL = A_IL.merge(ID_CONVER,on='surr')
+A_IL.loc[A_IL['name'].isin(GTDF['name']),['chr','Left','Right']].to_csv(f'TEMP/{SAMP}_{TE}_REST_A_IL_BMASKED.bed',sep="\t",header=False,index=False)
+A_IL.loc[A_IL['name'].isin(GTDF['name']),['surr']].to_csv(f'TEMP/{SAMP}_{TE}_REST_A_IL_SURR.bed',header=False,index=False)
+
+B_IL = pd.read_table(f'{TE}_REST.B_IL_AMASKED.tsv',names=['chr','Left','Right','surr'])
+B_IL = B_IL.merge(ID_CONVER,on='surr')
+B_IL.loc[B_IL['name'].isin(GTDF['name']),['chr','Left','Right']].to_csv(f'TEMP/{SAMP}_{TE}_REST_B_IL_AMASKED.bed',sep="\t",header=False,index=False)
+B_IL.loc[B_IL['name'].isin(GTDF['name']),['surr']].to_csv(f'TEMP/{SAMP}_{TE}_REST_B_IL_SURR.bed',header=False,index=False)
+```
+
+## # Statistics on IL counts on TE1-32 for SWO, PUM, and MAN
+
+```python
+#!/usr/bin/env python3
+
+import pandas as pd
+
+LIST=[]
+for i in range(1,33):
+    LIST.append("TE"+str(i))
+
+ID = pd.read_table('SRR_SPECIES.tsv', header=0)
+SWO = ID.loc[ID['Species']=="SWO",'ID'].to_list()
+MAN = ID.loc[ID['Species']=="MAN",'ID'].to_list()
+PUM = ID.loc[ID['Species']=="PUM",'ID'].to_list()
+
+df = pd.DataFrame()
+df['TE'] = LIST
+
+for TE in LIST:
+    GENOTYPE = pd.read_table(TE+'_GENOTYPE.tsv', header=0)
+    for SPE in ['SWO', 'MAN', 'PUM']:
+        df.loc[df['TE']==TE, SPE+'_mean'] = GENOTYPE[globals()[SPE]].sum(axis=0).mean()
+        df.loc[df['TE']==TE, SPE+'_min'] = GENOTYPE[globals()[SPE]].sum(axis=0).min()
+        df.loc[df['TE']==TE, SPE+'_max'] = GENOTYPE[globals()[SPE]].sum(axis=0).max()
+        df.loc[df['TE']==TE, SPE+'_std'] = GENOTYPE[globals()[SPE]].sum(axis=0).std()
+    GENOTYPE_T = GENOTYPE.set_index('name').T
+    GENOTYPE_T.reset_index(level=0,inplace=True)
+    GENOTYPE_T = GENOTYPE_T.rename(columns={"index": "ID"})
+    GENOTYPE_T = GENOTYPE_T.merge(ID,on='ID')
+    SUM = GENOTYPE_T.set_index('ID').groupby('Species').sum()
+    SUMT = SUM.T
+    df.loc[df['TE']==TE, 'MAN_UNIQ_IL'] = len(SUMT.loc[(SUMT['MAN']>0) & (SUMT['PUM']==0) & (SUMT['SWO']==0)].index)
+    df.loc[df['TE']==TE, 'PUM_UNIQ_IL'] = len(SUMT.loc[(SUMT['PUM']>0) & (SUMT['MAN']==0) & (SUMT['SWO']==0)].index)
+    df.loc[df['TE']==TE, 'SWO_UNIQ_IL'] = len(SUMT.loc[(SUMT['SWO']>0) & (SUMT['MAN']==0) & (SUMT['PUM']==0)].index)
+
+df.to_csv('TE1-32_Species_IL_Statistics.tsv', sep="\t", header=True, index=False)
+```
+
+### TE classification
+
+```bash
+qsub -I -l select=1:ncpus=24:mem=123gb:ngpus=1:gpu_model=k40:interconnect=fdr,walltime=72:00:00
+conda activate py36
+cd /zfs/socbd/bwu4/YU/annotation/FOUR_TE/TE_IN_CITRUS_GENOMES/SWO
+DeepTE/DeepTE.py -d working_dir -o DeepTE_output -i ALLTE_REP.fasta -sp P -m P
+```
+
+### # Correct DVS ILs located on the allelic chromosome
+
+```bash
+for N in {1..32}; do
+# Output upstream and downstream 100 bp regions of the scanned ILs
+awk '$1~/:/ {match($1, /(chr[1-9AB]*):([0-9]*)-([0-9]*)/, a); print a[1]"\t"a[3]-101"\t"a[3]"\t"$1}' \
+/scratch1/bwu4/TE_SCAN/TE${N}_NEW_GENOTYPE.tsv > TE${N}_IL_LEFT100.bed
+bedtools getfasta -nameOnly -fi CK2021.60.corrected.fasta -fo TE${N}_IL_LEFT100.fasta -bed TE${N}_IL_LEFT100.bed
+awk '$1~/:/ {match($1, /(chr[1-9AB]*):([0-9]*)-([0-9]*)/, a); print a[1]"\t"a[2]-1"\t"a[2]+100"\t"$1}' \
+/scratch1/bwu4/TE_SCAN/TE${N}_NEW_GENOTYPE.tsv > TE${N}_IL_RIGHT100.bed
+bedtools getfasta -nameOnly -fi CK2021.60.corrected.fasta -fo TE${N}_IL_RIGHT100.fasta -bed TE${N}_IL_RIGHT100.bed
+makeblastdb -in TE${N}_IL_LEFT100.fasta -parse_seqids -out TE${N}_IL_LEFT100 -dbtype nucl
+makeblastdb -in TE${N}_IL_RIGHT100.fasta -parse_seqids -out TE${N}_IL_RIGHT100 -dbtype nucl
+
+# Output upstream and downstream 100 bp regions of the DVS intact and unintact members
+awk '{print $1"\t"$2-101"\t"$3+100}' NEW${N}_UNINTACT_COPIES.bed > NEW${N}_UNINTACT_EXT100.bed
+bedtools getfasta -fi CK2021.60.corrected.fasta -fo NEW${N}_UNINTACT_EXT100.fasta \
+-bed NEW${N}_UNINTACT_EXT100.bed
+awk '{print $1"\t"$2-101"\t"$2}' NEW${N}_INTACT_COPIES.bed > NEW${N}_INTACT_LEFT100.bed
+awk '{print $1"\t"$3-1"\t"$3+100}' NEW${N}_INTACT_COPIES.bed > NEW${N}_INTACT_RIGHT100.bed
+bedtools getfasta -fi CK2021.60.corrected.fasta -fo NEW${N}_INTACT_L100.fasta \
+-bed NEW${N}_INTACT_LEFT100.bed
+bedtools getfasta -fi CK2021.60.corrected.fasta -bed NEW${N}_INTACT_RIGHT100.bed > NEW${N}_INTACT_R100.fasta
+
+blastn -query NEW${N}_INTACT_L100.fasta -db TE${N}_IL_RIGHT100 -outfmt 6 | awk '($1~/A/ && $2~/B/) || ($1~/B/ && $2~/A/)' | awk '$8>85 && $3>95 && $10<15 {print $1"\t"$2}' > TE${N}_AB_FILT_IL.tsv
+blastn -query NEW${N}_INTACT_R100.fasta -db TE${N}_IL_RIGHT100 -outfmt 6 | awk '($1~/A/ && $2~/B/) || ($1~/B/ && $2~/A/)' | awk '$7<15 && $3>95 && $9<15  {print $1"\t"$2}' >> TE${N}_AB_FILT_IL.tsv
+blastn -query NEW${N}_INTACT_L100.fasta -db TE${N}_IL_LEFT100 -outfmt 6 | awk '($1~/A/ && $2~/B/) || ($1~/B/ && $2~/A/)' | awk '$8>85 && $3>95 && $10>85  {print $1"\t"$2}' >> TE${N}_AB_FILT_IL.tsv
+blastn -query NEW${N}_INTACT_R100.fasta -db TE${N}_IL_LEFT100 -outfmt 6 | awk '($1~/A/ && $2~/B/) || ($1~/B/ && $2~/A/)' | awk '$7<15 && $3>95 && $9>85 {print $1"\t"$2}' >> TE${N}_AB_FILT_IL.tsv
+done
+
+for N in {1..32}; do
+sort -u TE${N}_AB_FILT_IL.tsv > TE${N}_AB_FILT_IL.tmp
+mv TE${N}_AB_FILT_IL.tmp TE${N}_AB_FILT_IL.tsv
+done 
+
+for TE in TE{1..32}; do ./AB_FILT_IL.py $TE ; done
+```
+
+### ###### Content of AB_FILT_IL.py
+
+```python
+#!/usr/bin/env python3
+
+import pandas as pd
+import sys
+
+TE=sys.argv[1]
+DVS_IL = pd.read_table(f'{TE}_AB_FILT_IL.tsv', names=['DVS','name'])
+GENOTYPE = pd.read_table(f'{TE}_NEW_GENOTYPE.tsv', header=0)
+DVS_IL = DVS_IL.merge(GENOTYPE[['name', 'DVS']],on='name')
+
+GENOTYPE.loc[~GENOTYPE['name'].isin(DVS_IL.loc[DVS_IL['DVS_y'].str.contains('NOT'),'name'])].to_csv(f'{TE}_GENOTYPE_FILT.tsv',header=True,sep="\t")
+```
+
+### ###### Calculate Mutant cell ratio
+
+```bash
+for TE in TE{1..32}; do
+./Calculate_MRATIO.py $TE
+done
+```
+
+### ###### Content of Calculate_MRATIO.py
+
+```python
+#!/usr/bin/env python3
+
+import pandas as pd
+import sys
+
+TE=sys.argv[1]
+W_COUNT = pd.read_table(f'{TE}_GENOTYPE_FILT.tsv', header=0)
+MASKW_COUNT = pd.read_table(f'{TE}_GENOTYPE_FILT.tsv', header=0)
+SAMP = pd.read_table('ALL0510.txt', header=None)
+
+for SRR in SAMP[0]:
+    W_COUNT[SRR] = 0
+    W = pd.read_table(f'{SRR}_{TE}.W_count.tsv', names=['name','W_COUNT'])
+    for IL in W['name']:
+        if IL in W_COUNT['name'].values:
+            W_COUNT.loc[W_COUNT['name']==IL,SRR] = W.loc[W['name']==IL,'W_COUNT'].to_list()[0]
+
+for SRR in SAMP[0]:
+    MASKW_COUNT[SRR] = 0
+    MASKW = pd.read_table(f'{SRR}_{TE}.MASK_W_count.tsv', names=['name','W_COUNT'])
+    for IL in MASKW['name']:
+        if IL in MASKW_COUNT['name'].values:
+            MASKW_COUNT.loc[MASKW_COUNT['name']==IL,SRR] = MASKW.loc[MASKW['name']==IL,'W_COUNT'].to_list()[0]
+
+MASKA = pd.read_table(f'{TE}.A_IL_BMASKED.tsv',header=None)[3].drop_duplicates()
+MASKB = pd.read_table(f'{TE}.B_IL_AMASKED.tsv',header=None)[3].drop_duplicates()
+MASK = pd.concat([MASKA,MASKB], ignore_index=True)
+
+W_COUNT = W_COUNT.set_index(['name','DVS'])
+MASKW_COUNT = MASKW_COUNT.set_index(['name','DVS'])
+WMERGE_COUNT = W_COUNT + MASKW_COUNT
+WMERGE_COUNT = WMERGE_COUNT.reset_index()
+WMERGE_COUNT.to_csv(f'{TE}_MERGED_W_READ_COUNT.tsv', sep="\t", header=True, index=False)
+WMERGE_COUNT_MASK = WMERGE_COUNT.loc[WMERGE_COUNT['name'].isin(MASK)].copy()
+WMERGE_COUNT_NOTMASK = WMERGE_COUNT.loc[~WMERGE_COUNT['name'].isin(MASK)].copy()
+WMERGE_COUNT_MASK.set_index(['name', 'DVS'], inplace=True)
+WMERGE_COUNT_NOTMASK.set_index(['name', 'DVS'], inplace=True)
+
+M_COUNT = pd.read_table(f'ALL_SAMP.{TE}.SPLIT_DISC_DVSMERGED.read_count.tsv', header=0)
+M_COUNT = M_COUNT.loc[M_COUNT['name'].isin(WMERGE_COUNT['name'])]
+M_COUNT_MASK = M_COUNT.loc[M_COUNT['name'].isin(MASK)].copy()
+M_COUNT_NOTMASK = M_COUNT.loc[~M_COUNT['name'].isin(MASK)].copy()
+M_COUNT_MASK.set_index(['name', 'DVS'], inplace=True)
+M_COUNT_NOTMASK.set_index(['name', 'DVS'], inplace=True)
+
+NOTMASK_MRATIO = M_COUNT_NOTMASK/2/(M_COUNT_NOTMASK/2+WMERGE_COUNT_NOTMASK+0.001)
+NOTMASK_MRATIO.where(NOTMASK_MRATIO<1,1,inplace=True)
+NOTMASK_MRATIO.reset_index(inplace=True)
+MASK_MRATIO = M_COUNT_MASK/(M_COUNT_MASK/2+WMERGE_COUNT_MASK+0.001)
+MASK_MRATIO.where(MASK_MRATIO<1,1,inplace=True)
+MASK_MRATIO.reset_index(inplace=True)
+
+pd.concat([NOTMASK_MRATIO, MASK_MRATIO], ignore_index=True).to_csv(f'{TE}_MRATIO.tsv', sep="\t", header=True, index=False)
+```
+
+### ###### Merge putative false-positive allelic ILs
+
+```bash
+cat TE1_GENOTYPE_FILT.tsv | awk \
+'$232~/NOT_DVS/{match($2,/(chr[1-9AB]*):([0-9]+)-([0-9]+)/, a); print a[1]"\t"a[2]-50"\t"a[3]+50"\t"$2}' \
+> TE1_NOTDVS_50SUR.bed
+
+bedtools getfasta -nameOnly -fi CK2021.60.corrected.fasta -bed TE1_NOTDVS_50SUR.bed -fo TE1_NOTDVS_50SUR.fasta
+
+makeblastdb -in TE1_NOTDVS_50SUR.fasta -dbtype nucl -parse_seqids -out TE1_NOTDVS_50SUR
+blastn -query TE1_NOTDVS_50SUR.fasta -db TE1_NOTDVS_50SUR -outfmt 6 -num_threads 24 | awk '$1!=$2'
+```
+
+### # Scanning precise ILs
+
+```bash
+bwa index ALLTE_REP.fasta
+bwa mem -t 20 ALLTE_REP.fasta CK_1.clean.fastq.gz  CK_2.clean.fastq.gz | samtools view -h -q1 -F4 > CK_ALLREP.sam
+samtools sort -@ 20 -o CK_ALLREP.srt.bam CK_ALLREP.sam
+samtools view CK_ALLREP.srt.bam | awk '$3~/TE1_/' | awk ' 
+{if ($5>0 && $4==1 && $6~/S/) {match($6, /([0-9]+)S([0-9]+)M/, a); 
+if ( a[1]>15 && a[2]>=30) {print ">"$1"\t"substr($10,1,a[1])}}}' | \
+sed "s/\t/\n/g" > CK_TE1.split_reads_L.fasta
+
+for N in {1..32} ; do
+infoseq -only -name -length NEW${N}_REP.fasta | \
+awk '$1~/TE/ {print $1":"$2"-"$2}' > TE${N}_R_Terminal.txt 
+done
+
+for TERMINAL in $( cat TE1_R_Terminal.txt ); do
+samtools view CK_TE1.srt.bam $TERMINAL | awk '
+{if ($5>0 && $6~/S/) {match($6, /([0-9]+)M([0-9]+)S/, a);
+if ( a[1]>=30 && a[2]>15 ) {print ">"$1"\t"substr($10,a[1]+1)}}
+}' | sed "s/\t/\n/g" >> CK_TE1.split_reads_R.fasta
+done
+
+bwa mem CK2021.05072022.MASKED.fasta CK_TE1.split_reads_L.fasta | \
+samtools view -q 1 -F 16 | \
+awk '{match($6, /([0-9]+)M/, a); print $3"\t"$4+a[1]-1"\t"$4+a[1]}' > CK_TE1.PRECISE.SPLIT_IL.bed
+
+bwa mem CK2021.05072022.MASKED.fasta CK_TE1.split_reads_L.fasta | \
+samtools view -q 1 -f 16 | \
+awk '{match($6, /([0-9]+)M/, a); print $3"\t"$4-1"\t"$4}' >> CK_TE1.PRECISE.SPLIT_IL.bed
+
+bwa mem CK2021.05072022.MASKED.fasta CK_TE1.split_reads_R.fasta | \
+samtools view -q 1 -f 16 | \
+awk '{match($6, /([0-9]+)M/, a); print $3"\t"$4+a[1]-2"\t"$4+a[1]-1}' >> CK_TE1.PRECISE.SPLIT_IL.bed
+
+bwa mem CK2021.05072022.MASKED.fasta CK_TE1.split_reads_R.fasta | \
+samtools view -q 1 -F 16 | \
+awk '{match($6, /([0-9]+)M/, a); print $3"\t"$4-1"\t"$4}' >> CK_TE1.PRECISE.SPLIT_IL.bed
+
+sort -u CK_TE1.PRECISE.SPLIT_IL.bed | bedtools sort -i - | \
+bedtools merge -d 20 -i - > CK_TE1.PRECISE.SPLIT_IL_MERGED.bed
+
+bedtools intersect -c -a CK_TE1.PRECISE.SPLIT_IL_MERGED.bed -b CK_TE1.PRECISE.SPLIT_IL.bed
+bedtools intersect -c -a CK_TE1.PRECISE.SPLIT_IL_MERGED.bed -b TE1/CK.TE1.DISC_SUP.bed
+bedtools intersect -c -a CK_TE1.PRECISE.SPLIT_IL_MERGED.bed -b TE1/CK.TE1.SPLIT_SUP.bed
+
+```
+
+### # Content of MAP_TO_ALLTEREP.sh
 
 ```bash
 #!/bin/bash
 SAMP=$1
 TE=$2
-NAME=$3
-LEFT=$( awk -F '[:-]' '{print $2}' <<< "${TE}" )
-RIGHT=$( awk -F '[:-]' '{print $3}' <<< "${TE}" )
-samtools index ${SAMP}.TE_masked.srt.bam
-samtools view -q 1 -h ${SAMP}.TE_masked.srt.bam ${TE} | awk -v x=${LEFT} -v y=${RIGHT} '
-$17~/SA:Z:/ && ($4<x+150 || $4>y-150) { match($17,/SA:Z:([^,]*),([^,]*),([+-]),([^,]*),([^,]*),/,a);
-if ($17~/,[0-9]+S[0-9]+M,/ && a[5]>0) {print a[1]"\t"a[2]-5"\t"a[2]+5"\t"$1};
-if ($17~/,[0-9]+M[0-9]+S,/ && a[5]>0) {match($17,/,([0-9]+)M/,b); print a[1]"\t"a[2]+b[1]-5"\t"a[2]+b[1]+5"\t"$1};
-if ($17~/,[0-9]+S[0-9]+M[0-9]+S,/ && a[5]>0) {match($17,/,([0-9]+)S([0-9]+)M([0-9]+)S,/,b); 
-if (b[1]>b[3]) {print a[1]"\t"a[2]-5"\t"a[2]+5"\t"$1} else {print a[1]"\t"a[2]+b[2]-5"\t"a[2]+b[2]+5"\t"$1}}
-}' > ${SAMP}_${NAME}.bed
+bwa mem -t 20 ALLTE_REP.fasta ${SAMP}_1.clean.fastq  ${SAMP}_2.clean.fastq | \
+samtools view -h -q1 -F4 > ${SAMP}_ALLREP.sam
+samtools sort -@ 20 -o ${SAMP}_ALLREP.srt.bam ${SAMP}_ALLREP.sam
 
-bedtools sort -i ${SAMP}_${NAME}.bed | bedtools merge -d 100 -i - > ${SAMP}_${NAME}.merged.bed
 ```
-
-# # Generating PBS scripts for the rest sweet orange SRRs
 
 ```bash
-for SRR in $( cat REST.SRR | grep -v 1025 ); do
-echo "#PBS -N $SRR
-#PBS -l select=1:ncpus=16:mem=60gb:interconnect=1g,walltime=72:00:00
-#PBS -j oe
-source ~/.bashrc
-conda activate ecDNA
-cd /zfs/socbd/bwu4/YU/annotation/FOUR_TE
-./PRE_CLE.sh ${SRR} 16" > ${SRR}.pbs
+TE=TE30
+for SAMP in $( grep RR ALL0510.txt ); do
+pat=${TE}"_"
+#samtools index ${SAMP}_ALLREP.srt.bam
+samtools view ${SAMP}_ALLREP.srt.bam | awk -v x="$pat" '$3~x' | awk ' 
+{if ($5>0 && $4==1 && $6~/S/) {match($6, /([0-9]+)S([0-9]+)M/, a); 
+if ( a[1]>15 && a[2]>=30) {print ">"$1"\t"substr($10,1,a[1])}}}' | \
+sed "s/\t/\n/g" > ${SAMP}_${TE}.split_reads_L.fasta
+rm -f ${SAMP}_${TE}.split_reads_R.fasta
+for TERMINAL in $( cat ${TE}_R_Terminal.txt ); do
+samtools view ${SAMP}_ALLREP.srt.bam $TERMINAL | awk '
+{if ($5>0 && $6~/S/) {match($6, /([0-9]+)M([0-9]+)S/, a);
+if ( a[1]>=30 && a[2]>15 ) {print ">"$1"\t"substr($10,a[1]+1)}}
+}' | sed "s/\t/\n/g" >> ${SAMP}_${TE}.split_reads_R.fasta
+done
+done
+
+TE=TE32
+for TE in TE{1..30}; do
+for SAMP in $( cat ALL0510.txt ); do
+seqkit rename ${SAMP}_${TE}.split_reads_L.fasta > ${SAMP}_${TE}.split_reads_L.fasta1
+mv ${SAMP}_${TE}.split_reads_L.fasta1 ${SAMP}_${TE}.split_reads_L.fas
+seqkit rename ${SAMP}_${TE}.split_reads_R.fasta > ${SAMP}_${TE}.split_reads_R.fasta1
+mv ${SAMP}_${TE}.split_reads_R.fasta1 ${SAMP}_${TE}.split_reads_R.fas
+done
 done
 ```
 
-# # Scanning TE insertion loci in the rest SRR bam
-
-```bash
-for SAM in $( cat REST.SRR ); do
-./FOUR_TE_INSERTION.sh $SAM chr1A:16314816-16321163 MU1
-done
-
-for SAM in $( cat REST.SRR ); do
-./FOUR_TE_INSERTION.sh $SAM chr5B:2319829-2326754 MU2
-done
-
-for SAM in $( cat FASTQ.list ); do
-for TE in MU1 MU2 ; do
-if test ! -f ${SAM}_${TE}.merged.filt.bed ; then
-    bedtools intersect -wa -a ${SAM}_${TE}.merged.bed -b ${SAM}_${TE}.bed | uniq -c | \
-        sed "s/ \+/\t/g;s/^\t//g" | awk '$1>1' | cut -f 2,3,4 > ${SAM}_${TE}.merged.filt.bed
-fi
-done
-done
-
-cat *_MU1.merged.filt.bed | bedtools sort -i - | bedtools merge -d 100 -i - > ALL_MU1.merged.filt.merged.bed
-cat *_MU2.merged.filt.bed | bedtools sort -i - | bedtools merge -d 100 -i - > ALL_MU2.merged.filt.merged.bed
-
-for SAM in $( cat FASTQ.list ); do
-bedtools intersect -c -a ALL_MU1.merged.filt.merged.bed -b ${SAM}_MU1.merged.filt.bed > ${SAM}_MU1.count.tsv
-bedtools intersect -c -a ALL_MU2.merged.filt.merged.bed -b ${SAM}_MU2.merged.filt.bed > ${SAM}_MU2.count.tsv
-done
-
-cut -f 1,2,3 CK_MU1.count.tsv > ALL_MU1.count.tsv
-cut -f 1,2,3 CK_MU2.count.tsv > ALL_MU2.count.tsv
-
-for SAM in $( cat FASTQ.list ); do
-cut -f 4 ${SAM}_MU1.count.tsv | paste ALL_MU1.count.tsv - > ALL_MU1.count.tsv.temp
-mv ALL_MU1.count.tsv.temp ALL_MU1.count.tsv
-cut -f 4 ${SAM}_MU2.count.tsv | paste ALL_MU2.count.tsv - > ALL_MU2.count.tsv.temp
-mv ALL_MU2.count.tsv.temp ALL_MU2.count.tsv
-done
-
-sed ':a;N;$!ba;s/\n/\t/g' FASTQ.list > header.txt  # replace \n with \t
-vi header.txt # add three columns to the header "CHR    START   END"
-cat header.txt ALL_MU1.count.tsv > ALL_MU1.count.tsv.temp
-mv ALL_MU1.count.tsv.temp ALL_MU1.count.tsv
-cat header.txt ALL_MU2.count.tsv > ALL_MU2.count.tsv.temp
-mv ALL_MU2.count.tsv.temp ALL_MU2.count.tsv
-
-awk '{print $1"\t"$2"\t"$3"\t"$1":"$2"-"$3}' CK_MU1.count.tsv > MU1.INS_LOCI.bed
-awk '{print $1"\t"$2"\t"$3"\t"$1":"$2"-"$3}' CK_MU2.count.tsv > MU2.INS_LOCI.bed
-
-bedtools intersect -wao -a MU2.INS_LOCI.bed -b ALL_FOUR_TE.EXT100.bed | awk '$5~/chr/ {print $1"\t"$2"\t"$3"\t"$4"\t"$5":"$6"-"$7} $5!~/chr/ {print $1"\t"$2"\t"$3"\t"$4"\t"$1":"$2"-"$3}' > MU2.ID_CONVERSION.tsv
-bedtools intersect -wao -a MU1.INS_LOCI.bed -b ALL_FOUR_TE.EXT100.bed | awk '$5~/chr/ {print $1"\t"$2"\t"$3"\t"$4"\t"$5":"$6"-"$7} $5!~/chr/ {print $1"\t"$2"\t"$3"\t"$4"\t"$1":"$2"-"$3}' > MU1.ID_CONVERSION.tsv
-
-cut -f 5 MU1.ID_CONVERSION.tsv | sort -u > MU1_INS_LOCI_FINAL.tsv
-cut -f 5 MU2.ID_CONVERSION.tsv | sort -u > MU2_INS_LOCI_FINAL.tsv
-
-awk '{match($1,/([^:]*):([^-]*)-([^-]*)/,a);print a[1]"\t"a[2]"\t"a[3]"\t"$1}' MU1_INS_LOCI_FINAL.tsv > MU1_INS_LOCI_FINAL.bed
-awk '{match($1,/([^:]*):([^-]*)-([^-]*)/,a);print a[1]"\t"a[2]"\t"a[3]"\t"$1}' MU2_INS_LOCI_FINAL.tsv > MU2_INS_LOCI_FINAL.bed
-
-bedtools intersect -wo -a MU1_INS_LOCI_FINAL.bed -b CK2021.FINAL.0403.gene.bed | awk '{print $4"\t"$8}' | sort -u > MU1.INS_LOCI.GENE.tsv
-bedtools intersect -wo -a MU2_INS_LOCI_FINAL.bed -b CK2021.FINAL.0403.gene.bed | awk '{print $4"\t"$8}' | sort -u > MU2.INS_LOCI.GENE.tsv
-
-bedtools intersect -wo -a MU1_INS_LOCI_FINAL.bed -b CK2021.FINAL.0403.CDS.bed | awk '{print $4"\t"$8}' | sort -u > MU1.INS_LOCI.CDS.tsv
-bedtools intersect -wo -a MU2_INS_LOCI_FINAL.bed -b CK2021.FINAL.0403.CDS.bed | awk '{print $4"\t"$8}' | sort -u > MU2.INS_LOCI.CDS.tsv
-
-bedtools intersect -wo -a MU1_INS_LOCI_FINAL.bed -b CK2021.FINAL.0403.UTR.bed  | awk '{print $4"\t"$8}' | sort -u > MU1.INS_LOCI.UTR.tsv
-bedtools intersect -wo -a MU2_INS_LOCI_FINAL.bed -b CK2021.FINAL.0403.UTR.bed  | awk '{print $4"\t"$8}' | sort -u > MU2.INS_LOCI.UTR.tsv
-
-bedtools intersect -wo -a MU1_INS_LOCI_FINAL.bed -b CK2021.FINAL.0403.gene.upstream.bed | awk '{print $4"\t"$8}' | sort -u > MU1.INS_LOCI.UPSTREAM.tsv
-bedtools intersect -wo -a MU2_INS_LOCI_FINAL.bed -b CK2021.FINAL.0403.gene.upstream.bed | awk '{print $4"\t"$8}' | sort -u > MU2.INS_LOCI.UPSTREAM.tsv
-```
-
-# # Sequencing depth analysis
-
-```bash
-for SRR in $( cat FASTQ.list ); do
-samtools view -@ $THREADS -b -q 1 -o ${SRR}.TE_masked.srt.q1.bam ${SRR}.TE_masked.srt.q1.bam
-bedtools coverage -mean -a CK2021.100_2K.srt.wins -b ${SRR}.TE_masked.srt.q1.bam > ${SRR}.100_2K.cov
-done
-
-sed ':a;N;$!ba;s/\n/\t/g' FASTQ.list | echo "CHR\tSTART\tEND\tNAME\t"-
-	
-```
-
-# # Identification of Mu1-3 in different citrus assemblies
-
-```bash
-ls /zfs/socbd/bwu4/REF/
-# CCL  CSI  HKC_Box  HWB  KUMQUAT  MSYJ  PTR  XJC_Ci  XZ_Citron  ZK_Pt
-
-cd /zfs/socbd/bwu4/YU/annotation/FOUR_TE/TE_IN_CITRUS_GENOMES
-makeblastdb -in /zfs/socbd/bwu4/REF/KUMQUAT/GJ.contig.fa -dbtype nucl -parse_seqids -out GJ
-mv GJ* /zfs/socbd/bwu4/REF/KUMQUAT/
-blastn -query ../FOUR_TE.fasta -db /zfs/socbd/bwu4/REF/KUMQUAT/GJ -num_threads 40 -evalue 1E-3 -perc_identity 0.9 -outfmt 6 > FOUR_TE_GJ.results
-
-makeblastdb -in /zfs/socbd/bwu4/REF/HKC_Box/HKC.scaffold.fa -dbtype nucl -parse_seqids -out HKC
-mv HKC* /zfs/socbd/bwu4/REF/HKC_Box/
-blastn -query ../FOUR_TE.fasta -db /zfs/socbd/bwu4/REF/HKC_Box/HKC -num_threads 40 -evalue 1E-3 -perc_identity 0.9 -outfmt 6 > FOUR_TE_HKC.results
-
-makeblastdb -in /zfs/socbd/bwu4/REF/XJC_Ci/XJC.scaffold.fa -dbtype nucl -parse_seqids -out XJC
-mv XJC* /zfs/socbd/bwu4/REF/XJC_Ci/
-blastn -query ../FOUR_TE.fasta -db /zfs/socbd/bwu4/REF/XJC_Ci/XJC -num_threads 40 -evalue 1E-3 -perc_identity 0.9 -outfmt 6 > FOUR_TE_XJC.results
-
-makeblastdb -in /zfs/socbd/bwu4/REF/XZ_Citron/XZ.scaffold.fa -dbtype nucl -parse_seqids -out XZ
-mv XZ* /zfs/socbd/bwu4/REF/XZ_Citron/
-blastn -query ../FOUR_TE.fasta -db /zfs/socbd/bwu4/REF/XZ_Citron/XZ -num_threads 40 -evalue 1E-3 -perc_identity 0.9 -outfmt 6 > FOUR_TE_XZ.results
-
-for RESU in FOUR_TE_GJ.results FOUR_TE_HKC.results FOUR_TE_XJC.results FOUR_TE_XZ.results ; do
-awk '$1=="LINE1" && ($7<50 || $8>6300) {print}' $RESU > ${RESU}.Mu1_TEMP
-awk '$1=="LINE2" && ($7<50 || $8>6900) {print}' $RESU > ${RESU}.Mu2_TEMP
-done
-
-bedtools getfasta -s -nameOnly -fi /zfs/socbd/bwu4/REF/XJC_Ci/XJC.scaffold.fa -fo XJC_4TE.fasta -bed XJC_4TE.bed  
-
-bedtools getfasta -s -nameOnly -fi /zfs/socbd/bwu4/REF/XZ_Citron/XZ.scaffold.fa -fo XZ_4TE.fasta -bed XZ_4TE.bed
-
-bedtools getfasta -s -nameOnly -fi /zfs/socbd/bwu4/REF/KUMQUAT/GJ.contig.fa -fo HK_4TE.fasta -bed HK_4TE.bed
-
-bedtools getfasta -s -nameOnly -fi /zfs/socbd/bwu4/REF/HKC_Box/HKC.scaffold.fa -fo HKC_4TE.fasta -bed HKC_4TE.bed
-```
-
-# # Mask reference genome
-
-```bash
-mkdir /zfs/socbd/bwu4/YU/annotation/FOUR_TE/09212021_NEW 
-cd /zfs/socbd/bwu4/YU/annotation/FOUR_TE/09212021_NEW 
-infoseq -only -name -length CK2021.60.corrected.A.fasta > CK2021.A.txt
-infoseq -only -name -length CK2021.60.corrected.B.fasta > CK2021.B.txt
-sed -i 1d CK2021.A.txt
-sed -i 1d CK2021.B.txt
-sed -i 's/  / /g' *.txt # Replace double spaces with single space multiple times
-sed -i "s/ /\t/g" *.txt
-bedtools makewindows -g CK2021.A.txt -w 50 -s 10 > CK2021.A.50_10.wins
-bedtools getfasta -fi CK2021.60.corrected.A.fasta -bed CK2021.A.50_10.wins -fo CK2021.A.50_10.fasta
-
-bwa mem -t 8 CK2021.60.corrected.B.fasta CK2021.A.50_10.fasta > CK2021.A.50_10.B.sam
-awk '{if ($6~/50M/ && $12~/NM:i:0/) print $3"\t"$4-1"\t"$4+49}'  CK2021.A.50_10.B.sam > CK2021.B.DUP.bed
-bedtools sort -i CK2021.B.DUP.bed | bedtools merge -i - > CK2021.B.DUP.merged.bed
-awk '$3-$2>=101 {print $1"\t"$2+50"\t"$3-50}' CK2021.B.DUP.merged.bed > CK2021.B.TO_MASK.bed
-cut -f 1,2,3 CORRECTED_DVS_4TE.bed > CORRECTED_DVS_4TE.1-3.bed
-# add the 5 non-intact MULE regions in CORRECTED_DVS_4TE.1-3.bed
-cat CORRECTED_DVS_4TE.1-3.bed CK2021.B.TO_MASK.bed | bedtools sort -i - | bedtools merge -i - > CK2021.ALLELE_Mu.MASKED.bed
-bedtools maskfasta -fi CK2021.ALLELE_Mu.MASKED.fasta -bed CK2021.B.TO_MASK.bed -fo CK2021.09282021.MASKED.fasta
-
-# The final masked regions are recorded in the file CK2021.ALLELE_MU.MASKED.bed
-```
-
-# # Mapping cleaned fastq to masked reference with separate mutators
-
-```bash
-ln /zfs/socbd/bwu4/YU/annotation/FOUR_TE/09212021_NEW/CK2021.ALLELE_Mu.MASKED.fasta
-bwa index CK2021.ALLELE_Mu.MASKED.fasta
-bwa mem -t 18 CK2021.09282021.MASKED.fasta /zfs/socbd/bwu4/YU/VA_NGS/${SAMP}_1.clean.fastq \
-        /zfs/socbd/bwu4/YU/VA_NGS/${SAMP}_2.clean.fastq | samtools sort -@ 2 -O BAM -o ${SAMP}.TE_masked.srt.bam
-```
-
-# # Filter_Split_Reads.py
-
-```python
-#!/usr/bin/env python3
-
-import pandas as pd
-import sys
-# sys.argv[1] : list of informative split mapped reads
-# sys.argv[2] : path of two-column SAM file
-
-SPLIT = pd.read_table(sys.argv[1], names=['ReadID'])
-SAM = pd.read_table(sys.argv[2],names=['ReadID','Merged_columns'])
-SAM.loc[~SAM['ReadID'].isin(SPLIT['ReadID'])].to_csv('SPLIT_FILT.'+sys.argv[2],sep="\t", index=False, header=False)
-```
-
-# # Content of TE_INSERT_READ.sh
+### # Content of OUTPUT_PRECISE_IL.sh
 
 ```bash
 #!/bin/bash
+SAMP=$1
+TE=$2
+bwa mem CK2021.05072022.MASKED.fasta ${SAMP}_${TE}.split_reads_L.fas | \
+samtools view -q 1 -F 16 | \
+awk '{match($6, /([0-9]+)M/, a); print $3"\t"$4+a[1]-1"\t"$4+a[1]}' > ${SAMP}_${TE}.PRECISE.SPLIT_IL.bed
 
-# Read transposable element (TE) end information from file $1 into the array a, with each line as an element
-# The file format of the first argument (**space as seperator**; n denotes the full length of the TE in the reference): 
-   # TE_ID 1 LEFT
-   # TE_ID n RIGHT   
-readarray -t a < $1
+bwa mem CK2021.05072022.MASKED.fasta ${SAMP}_${TE}.split_reads_L.fas | \
+samtools view -q 1 -f 16 | \
+awk '{match($6, /([0-9]+)M/, a); print $3"\t"$4-1"\t"$4}' >> ${SAMP}_${TE}.PRECISE.SPLIT_IL.bed
 
-# SRR ID or sample ID, the sorted bam should be named as ${SAMP}.TE_masked.srt.bam
-SAMP=$2
-# Number of threads, must be integer
-TR=$3
-# Single-end sequencing read length 
-READ_LEN=$4
-# Average sequencing library insertion segment length
-INS_LEN=$5
-MAX_INS=$((INS_LEN*2))
+bwa mem CK2021.05072022.MASKED.fasta ${SAMP}_${TE}.split_reads_R.fas | \
+samtools view -q 1 -f 16 | \
+awk '{match($6, /([0-9]+)M/, a); print $3"\t"$4+a[1]-2"\t"$4+a[1]-1}' >> ${SAMP}_${TE}.PRECISE.SPLIT_IL.bed
 
-# Common text in TE names. For instance, 'Mu' in TEs with names 'Mu1_1, Mu1_2, Mu1_3, Mu2_1, Mu2_2' in the reference fasta file
-TE=$6
+bwa mem CK2021.05072022.MASKED.fasta ${SAMP}_${TE}.split_reads_R.fas | \
+samtools view -q 1 -F 16 | \
+awk '{match($6, /([0-9]+)M/, a); print $3"\t"$4-1"\t"$4}' >> ${SAMP}_${TE}.PRECISE.SPLIT_IL.bed
 
-# Reference fasta file including modified Mu sequences
-REF=$7
+sort -u ${SAMP}_${TE}.PRECISE.SPLIT_IL.bed | bedtools sort -i - | \
+bedtools merge -d 20 -i - > ${SAMP}_${TE}.PRECISE.SPLIT_IL_MERGED.bed
 
-# Initialization of variable i
-i=0
-
-# Mapping cleaned fastq to the reference if the sorted bam does not exist
-if [[ ! -f "${SAMP}.TE_masked.srt.bam" ]]; then
-echo "Start mapping ${SAMP}_1.clean.fastq and ${SAMP}_1.clean.fastq to the masked reference"
-	# Index reference fasta file if the index file does not exist
-	if [[ ! -f ${REF} ]]; then
-	echo "Error : neither the bam file of ${SAMP} nor the reference fasta file exist."	
-	exit 1
-	fi
-	if [[ ! -f "${REF}.sa" ]]; then
-		bwa index $REF
-	fi
-
-	if [[ -f "${SAMP}_1.clean.fastq" ]] && [[ -f "${SAMP}_2.clean.fastq" ]] ; then
-		bwa mem -t $TR ${REF} ${SAMP}_1.clean.fastq \
-		        ${SAMP}_2.clean.fastq | samtools sort -@ $TR -O BAM -o ${SAMP}.TE_masked.srt.bam
-	elif [[ -f "${SAMP}_1.clean.fastq.gz" ]] && [[ -f "${SAMP}_2.clean.fastq.gz" ]] ; then
-		bwa mem -t $TR ${REF} ${SAMP}_1.clean.fastq.gz \
-		        ${SAMP}_2.clean.fastq.gz | samtools sort -@ $TR -O BAM -o ${SAMP}.TE_masked.srt.bam
-	else
-	echo "Error : no bam file or fastq file of ${SAMP} exist in current working directory."
-	echo "Either ${SAMP}_[12].clean.fastq.gz or ${SAMP}_[12].clean.fastq files should be supplied"
-	exit 2
-	fi
-fi
-
-#Index the sorted BAM file
-if [[ ! -f "${SAMP}.TE_masked.srt.bam.bai" ]]; then
-samtools index -@ $TR ${SAMP}.TE_masked.srt.bam
-fi
-
-# Delete previously produced files
-rm -f ${SAMP}.SPLIT_SUP.bed
-rm -f ${SAMP}.DISC_SUP.bed
-rm -f ${SAMP}.*.sam
-
-# Re-sort the bam via read name
-samtools view -h -f 1 -F 2318 ${SAMP}.TE_masked.srt.bam | samtools sort -@ $((TR-1)) -n -o ${SAMP}.disc.readname_srt.bam -
-
-while [[ $i -lt ${#a[@]} ]]; do
-# Split each element in $a (each line in $1) into an array
-	IFS=' ' read -r -a array <<< ${a[$i]}
-	### Detection of TE insertion loci (IL)
-	# Identification of insertion loci supported by split-mapped reads
-	# The output bed file format:
-		# Column 1: chromosomal ID of IL
-	  # Column 2: insertion coordinate - 5
-	  # Column 3: insertion coordinate + 5
-	  # Column 4: TE name
-	  # Column 5: 0 and 1 indicate the read being mapped to the left and right end of TE, respectively
-	  # Column 6: + and - indicate the TE was inserted in the forward and reverse directions in the reference, respectively    
-if [[ ${array[2]} = "LEFT" ]]; then
-	samtools view -q 1 ${SAMP}.TE_masked.srt.bam ${array[0]}:1-10 | \
-awk '{if ($0~/SA:Z:/ && $4<=10) 
-	{match($0,/SA:Z:([^,]*),([^,]*),([+-])(,[^,]*,)([^,]*),/,a);
-	if (a[4]~/,[0-9]+S[0-9]+M,/ && a[5]>0) 
-	    print a[1]"\t"a[2]+$4-1-1"\t"a[2]+$4-1"\t"$3"\t0\t-\t"$1;
-	if (a[4]~/,[0-9]+M[0-9]+S,/ && a[5]>0) 
-	    {match(a[4],/,([0-9]+)M/,b); print a[1]"\t"a[2]+b[1]-$4-1"\t"a[2]+b[1]-$4"\t"$3"\t0\t+\t"$1};
-	if (a[4]~/,[0-9]+S[0-9]+M[0-9]+S,/ && a[5]>0) 
-	    {
-      match(a[4],/,([0-9]+)S([0-9]+)M([0-9]+)S,/,b); 
-			if (b[1]>b[3]) 
-			   print a[1]"\t"a[2]+$4-1-1"\t"a[2]+$4-1"\t"$3"\t0\t-\t"$1; 
-			else 
-			   print a[1]"\t"a[2]+b[2]-$4-1"\t"a[2]+b[2]-$4"\t"$3"\t0\t+\t"$1; 
-      }
-	}}' | awk -v x=$TE '$1!~x' >> ${SAMP}.SPLIT_SUP.bed
-fi
-if [[ ${array[2]} = "RIGHT" ]]; then
-  RCOOR=${array[1]}
-	samtools view -q 1 ${SAMP}.TE_masked.srt.bam ${array[0]}:$((RCOOR-10))-${RCOOR} | \
-awk -v x=${RCOOR} -v y=$READ_LEN '{if ($0~/SA:Z:/ && $4>x-y+15) 
-	{ match($0,/SA:Z:([^,]*),([^,]*),([+-])(,[^,]*,)([^,]*),/,a); {match($6,/([0-9]+)M/,c);
-	if (a[4]~/,[0-9]+S[0-9]+M,/ && a[5]>0 && $6!~/M.*M/ && x-$4-c[1]<10) 
-	    print a[1]"\t"a[2]+(x-$4)-c[1]-1"\t"a[2]+(x-$4)-c[1]"\t"$3"\t1\t+\t"$1};
-	if (a[4]~/,[0-9]+M[0-9]+S,/ && a[5]>0 && $6!~/M.*M/ && x-$4-c[1]<10) 
-	    {match(a[4],/,([0-9]+)M([0-9]+)S,/,b); print a[1]"\t"a[2]+b[1]-x+$4+c[1]-1"\t"a[2]+b[1]-x+$4+c[1]"\t"$3"\t1\t-\t"$1};
-	if (a[4]~/,[0-9]+S[0-9]+M[0-9]+S,/ && a[5]>0 && $6!~/M.*M/ && x-$4-c[1]<10) 
-	    {match(a[4],/,([0-9]+)S([0-9]+)M([0-9]+)S,/,b); 
-			if (b[1]>b[3]) 
-			   print a[1]"\t"a[2]+(x-$4)-c[1]-1"\t"a[2]+(x-$4)-c[1]"\t"$3"\t1\t+\t"$1; 
-			else 
-			   print a[1]"\t"a[2]+b[2]-x+$4+c[1]-1"\t"a[2]+b[2]-x+$4+c[1]"\t"$3"\t1\t-\t"$1;
-      }
-	}}' | awk -v x=$TE '$1!~x' >> ${SAMP}.SPLIT_SUP.bed
-fi
-i=$((i+1)) 
-done
-
-# Write the informative split-mapped reads supporting the ILs
-cut -f 7 ${SAMP}.SPLIT_SUP.bed | sort -u > ${SAMP}_INFOSPLIT_READS.txt
-
-# MQ tag (MAPQ of mate read) is added by samblaster
-# Disconcordant read pairs with pair-end reads mapped to reverse (R) strand of chromosomes and TE LEFT end, '-' insertion type
-samtools view -h ${SAMP}.disc.readname_srt.bam | samblaster --addMateTags | samtools view -f 48 | grep -v "#" | \
-awk -v x=$TE 'match($0, /MQ:i:([0-9]+)/,a) && a[1]>0 && $3~x && $7!~x && $7!~/=/ && $5>0' > ${SAMP}.disc.LEFT_R.IL_R.sam
-sed -i "s/\t/|/;s/\t/ /g;s/|/\t/" ${SAMP}.disc.LEFT_R.IL_R.sam # Format multiple column SAM into two columns
-Filter_Split_Read.py ${SAMP}_INFOSPLIT_READS.txt ${SAMP}.disc.LEFT_R.IL_R.sam # Filter informative split reads
-sed -i "s/ /\t/g" SPLIT_FILT.${SAMP}.disc.LEFT_R.IL_R.sam # Turn two-column SAM into ordinary SAM file
-
-# Disconcordant read pairs with pair-end reads mapped to R strand of TE LEFT end and forward (F) strand of chromosomes, '+' insertion type
-samtools view -h ${SAMP}.disc.readname_srt.bam | samblaster --addMateTags | samtools view -f 16 -F 32 | grep -v "#" | \
-awk -v x=$TE 'match($0, /MQ:i:([0-9]+)/,a) && a[1]>0 && $3~x && $7!~x && $7!~/=/ && $5>0' > ${SAMP}.disc.LEFT_R.IL_F.sam
-sed -i "s/\t/|/;s/\t/ /g;s/|/\t/" ${SAMP}.disc.LEFT_R.IL_F.sam # Format multiple column SAM into two columns
-Filter_Split_Read.py ${SAMP}_INFOSPLIT_READS.txt ${SAMP}.disc.LEFT_R.IL_F.sam # Filter informative split reads
-sed -i "s/ /\t/g" SPLIT_FILT.${SAMP}.disc.LEFT_R.IL_F.sam # Turn two-column SAM into ordinary SAM file
-
-# Disconcordant read pairs with pair-end reads mapped to F strand of chromosomes and TE Right end, '-' insertion type
-samtools view -h ${SAMP}.disc.readname_srt.bam | samblaster --addMateTags | samtools view -F 48 | grep -v "#" | \
-awk -v x=$TE 'match($0, /MQ:i:([0-9]+)/,a) && a[1]>0 && $3~x && $7!~x && $7!~/=/ && $5>0' > ${SAMP}.disc.RIGHT_F.IL_F.sam
-sed -i "s/\t/|/;s/\t/ /g;s/|/\t/" ${SAMP}.disc.RIGHT_F.IL_F.sam # Format multiple column SAM into two columns
-Filter_Split_Read.py ${SAMP}_INFOSPLIT_READS.txt ${SAMP}.disc.RIGHT_F.IL_F.sam # Filter informative split reads
-sed -i "s/ /\t/g" SPLIT_FILT.${SAMP}.disc.RIGHT_F.IL_F.sam # Turn two-column SAM into ordinary SAM file
-
-# Disconcordant read pairs with pair-end reads mapped to F strand of TE right end and R strand of chromosomes, '+' insertion type
-samtools view -h ${SAMP}.disc.readname_srt.bam | samblaster --addMateTags | samtools view -f 32 -F 16 | grep -v "#" | \
-	awk -v x=$TE 'match($0, /MQ:i:([0-9]+)/,a) && a[1]>0 && $3~x && $7!~x && $7!~/=/ && $5>0' > ${SAMP}.disc.RIGHT_F.IL_R.sam
-sed -i "s/\t/|/;s/\t/ /g;s/|/\t/" ${SAMP}.disc.RIGHT_F.IL_R.sam # Transfer multiple column SAM into two columns
-Filter_Split_Read.py ${SAMP}_INFOSPLIT_READS.txt ${SAMP}.disc.RIGHT_F.IL_R.sam # Filter informative split reads
-sed -i "s/ /\t/g" SPLIT_FILT.${SAMP}.disc.RIGHT_F.IL_R.sam # Turn two-column SAM into ordinary SAM file
-
-# Identification of insertion loci supported by disconcordantly mapped reads
-  # The output bed file format:
-	  # Column 1: chromosomal ID of IL
-	  # Column 2: minimum possible coordinate of IL
-	  # Column 3: maximum possible coordinate of IL 
-	  # Column 4: TE name
-	  # Column 5: 0 and 1 indicate the read being mapped to the left and right end of TE, respectively
-	  # Column 6: + and - indicate the TE was inserted in the forward and reverse directions in the reference, respectively 
-# Disconcordant reads surround Left ends of TEs
-awk -v y=${MAX_INS} -v z=${READ_LEN} '{if ($4<y-z) print $7"\t"$8-y+z+int(z/2)"\t"$8+5"\t"$3"\t0\t-\t"$1}' \
-	SPLIT_FILT.${SAMP}.disc.LEFT_R.IL_R.sam >> ${SAMP}.DISC_SUP.bed
-awk -v y=${MAX_INS} -v z=${READ_LEN} '{match($14, /([0-9]+)M[0-9]*[DSHI]*([0-9]*)M*/, a); if ($4<y-z) print $7"\t"$8+a[1]+a[2]-6"\t"$8+y-z-int(z/2)"\t"$3"\t0\t+\t"$1}' \
-	SPLIT_FILT.${SAMP}.disc.LEFT_R.IL_F.sam >> ${SAMP}.DISC_SUP.bed
-# Disconcordant reads surround Right ends of TEs 
-awk -v y=${MAX_INS} -v z=${READ_LEN} '{match($14, /([0-9]+)M[0-9]*[DSHI]*([0-9]*)M*/, a); print $7"\t"$8+a[1]+a[2]-6"\t"$8+y-z-int(z/2)"\t"$3"\t1\t-\t"$1}' \
-	SPLIT_FILT.${SAMP}.disc.RIGHT_F.IL_F.sam >> ${SAMP}.DISC_SUP.bed
-awk -v y=${MAX_INS} -v z=${READ_LEN} '{print $7"\t"$8-y+z+int(z/2)"\t"$8+5"\t"$3"\t1\t+\t"$1}' \
-	SPLIT_FILT.${SAMP}.disc.RIGHT_F.IL_R.sam >> ${SAMP}.DISC_SUP.bed
+bedtools intersect -c -a ${SAMP}_${TE}.PRECISE.SPLIT_IL_MERGED.bed \
+-b ${SAMP}_${TE}.PRECISE.SPLIT_IL.bed > ${SAMP}_${TE}.PRECISE_IL.PRE_SPLIT_COUNT.tsv
+bedtools intersect -c -a ${SAMP}_${TE}.PRECISE.SPLIT_IL_MERGED.bed \
+-b ${TE}/${SAMP}.${TE}.DISC_SUP.bed > ${SAMP}_${TE}.PRECISE_IL.DISC_COUNT.tsv
+bedtools intersect -c -a ${SAMP}_${TE}.PRECISE.SPLIT_IL_MERGED.bed \
+-b ${TE}/${SAMP}.${TE}.SPLIT_SUP.bed > ${SAMP}_${TE}.PRECISE_IL.OLD_SPLIT_COUNT.tsv
 ```
 
-# # IL results statistics
-
 ```bash
-
-# Separate MU1 and MU2 ILs
-for SAMP in $( cat ALL1014.SAMP ); do 
-awk '$4~/Mu1/' ${SAMP}.SPLIT_SUP.bed > MU1/${SAMP}.MU1.SPLIT_SUP.bed
-awk '$4~/Mu2/' ${SAMP}.SPLIT_SUP.bed > MU2/${SAMP}.MU2.SPLIT_SUP.bed 
-done
-
-# Put all ILs detected by SPLIT reads in one bed file
-cat MU1/*.MU1.SPLIT_SUP.bed > ALL_MU1.SPLIT.bed
-cat MU2/*.MU2.SPLIT_SUP.bed > ALL_MU2.SPLIT.bed
-# Put all ILs detected by DISC reads in one bed file
-cat MU1/*.MU1.DISC_SUP.bed > ALL_MU1.DISC.bed
-cat MU2/*.MU2.DISC_SUP.bed > ALL_MU2.DISC.bed
-# Put all ILs detected by SPLIT and DISC reads in one bed file
-cat ALL_MU1.SPLIT.bed ALL_MU1.DISC.bed > ALL_MU1.SPLIT_DISC.bed
-cat ALL_MU2.SPLIT.bed ALL_MU2.DISC.bed > ALL_MU2.SPLIT_DISC.bed
-
-bedtools sort -i ALL_MU1.SPLIT.bed | bedtools merge -d 20 -i - > ALL_MU1.SPLIT_IL.merged.bed
-bedtools sort -i ALL_MU2.SPLIT.bed | bedtools merge -d 20 -i - > ALL_MU2.SPLIT_IL.merged.bed
-
-bedtools intersect -wo -a ALL_MU1.SPLIT_IL.merged.bed  -b ALL_MU1.SPLIT.bed > ALL_MU1.SPLIT_IL.SPLIT.intersect
-bedtools intersect -wo -a ALL_MU1.SPLIT_IL.merged.bed  -b ALL_MU1.DISC.bed > ALL_MU1.SPLIT_IL.DISC.intersect
-
-bedtools intersect -wo -a ALL_MU2.SPLIT_IL.merged.bed  -b ALL_MU2.SPLIT.bed > ALL_MU2.SPLIT_IL.SPLIT.intersect
-bedtools intersect -wo -a ALL_MU2.SPLIT_IL.merged.bed  -b ALL_MU2.DISC.bed > ALL_MU2.SPLIT_IL.DISC.intersect
-
-bedtools intersect -c -a ALL_MU1.SPLIT_IL.merged.bed -b ALL_MU1.SPLIT_DISC.bed > ALL_MU1.SPLIT_IL.SPLIT_DISC.count.tsv
-awk '$4>1' ALL_MU1.SPLIT_IL.SPLIT_DISC.count.tsv | cut -f 1,2,3 > ALL_MU1.2SUP.bed
-
-bedtools intersect -c -a ALL_MU2.SPLIT_IL.merged.bed -b ALL_MU2.SPLIT_DISC.bed > ALL_MU2.SPLIT_IL.SPLIT_DISC.count.tsv
-awk '$4>1' ALL_MU2.SPLIT_IL.SPLIT_DISC.count.tsv | cut -f 1,2,3 > ALL_MU2.2SUP.bed
-
-# Screen ILs supported by DISC read pairs but not SPLIT read pairs 
-bedtools sort -i ALL_MU1.DISC.bed | bedtools intersect -v -wo -a - -b ALL_MU1.SPLIT_IL.merged.bed > ALL_MU1.DISC.no_SPLIT.bed
-bedtools sort -i ALL_MU2.DISC.bed | bedtools intersect -v -wo -a - -b ALL_MU2.SPLIT_IL.merged.bed > ALL_MU2.DISC.no_SPLIT.bed
-# Merge ILs supported by DISC read pairs but not by SPLIT read pairs, and filter the obtained IL based on the count of supporting read pairs.
-bedtools merge -i ALL_MU1.DISC.no_SPLIT.bed | bedtools intersect -wo -a - -b ALL_MU1.DISC.no_SPLIT.bed | awk '$4>1' > ALL_MU1.DISC.no_SPLIT.DISC_intersect.bed
-bedtools merge -i ALL_MU2.DISC.no_SPLIT.bed | bedtools intersect -wo -a - -b ALL_MU2.DISC.no_SPLIT.bed | awk '$4>1' > ALL_MU2.DISC.no_SPLIT.DISC_intersect.bed
-# Count no_SPLIT IL read support count
-bedtools merge -i ALL_MU1.DISC.no_SPLIT.bed | bedtools intersect -c -a - -b ALL_MU1.DISC.no_SPLIT.bed > ALL_MU1.DISC_ONLY_IL.DISC_COUNT.TSV
-bedtools merge -i ALL_MU2.DISC.no_SPLIT.bed | bedtools intersect -c -a - -b ALL_MU2.DISC.no_SPLIT.bed > ALL_MU2.DISC_ONLY_IL.DISC_COUNT.TSV
-# DISC support only ILs
-cat ALL_MU1.DISC_ONLY_IL.DISC_COUNT.TSV | awk '$4>1 {print $1"\t"$2"\t"$3}' > ALL_MU1.DISC_ONLY_IL.bed
-cat ALL_MU2.DISC_ONLY_IL.DISC_COUNT.TSV | awk '$4>1 {print $1"\t"$2"\t"$3}' > ALL_MU2.DISC_ONLY_IL.bed
-# Count reads in each sample and put all the data into one table file
-cp ALL_MU1.DISC_ONLY_IL.bed MU1.DISC_ONLY.244SAMP.READ_COUNT.tsv
-for SAMP in $( cat 1124_ALL_SAMP.list ); do
-bedtools intersect -c -a ALL_MU1.DISC_ONLY_IL.bed -b MU1/${SAMP}.MU1.DISC_SUP.bed | cut -f 4 > TEMP_COLUMN.txt
-paste MU1.DISC_ONLY.244SAMP.READ_COUNT.tsv TEMP_COLUMN.txt > MU1.DISC_ONLY.244SAMP.READ_COUNT.tsv.tmp
-mv MU1.DISC_ONLY.244SAMP.READ_COUNT.tsv.tmp MU1.DISC_ONLY.244SAMP.READ_COUNT.tsv
-done
-cp ALL_MU2.DISC_ONLY_IL.bed MU2.DISC_ONLY.244SAMP.READ_COUNT.tsv
-for SAMP in $( cat 1124_ALL_SAMP.list ); do
-bedtools intersect -c -a ALL_MU2.DISC_ONLY_IL.bed -b MU2/${SAMP}.MU2.DISC_SUP.bed | cut -f 4 > TEMP_COLUMN.txt
-paste MU2.DISC_ONLY.244SAMP.READ_COUNT.tsv TEMP_COLUMN.txt > MU2.DISC_ONLY.244SAMP.READ_COUNT.tsv.tmp
-mv MU2.DISC_ONLY.244SAMP.READ_COUNT.tsv.tmp MU2.DISC_ONLY.244SAMP.READ_COUNT.tsv
-done
-
-tr '\n' '\t' < 1124_ALL_SAMP.list > header.txt
-echo -e "chr\tLeft\tRight\t$( cat header.txt )" > header.txt
-cat header.txt MU1.DISC_ONLY.244SAMP.READ_COUNT.tsv > MU1.DISC_ONLY.244SAMP.READ_COUNT.tsv.tmp
-mv MU1.DISC_ONLY.244SAMP.READ_COUNT.tsv.tmp MU1.DISC_ONLY.244SAMP.READ_COUNT.tsv
-cat header.txt MU2.DISC_ONLY.244SAMP.READ_COUNT.tsv > MU2.DISC_ONLY.244SAMP.READ_COUNT.tsv.tmp
-mv MU2.DISC_ONLY.244SAMP.READ_COUNT.tsv.tmp MU2.DISC_ONLY.244SAMP.READ_COUNT.tsv
+for TE in TE{1..32} ; do for SAMP in $( cat ALL0510.txt ); do ./OUTPUT_PRECISE_IL.sh $SAMP ${TE} ; done; done
 ```
 
-## Identify the MU1 and MU2 members in SWO assemblies
+### # Filter PRECISE ILMERGE
 
 ```bash
-for DB in GCA_019144185.1 GCA_019144245.1 GCA_019144225.1 GCA_019144155.1 GCA_019144195.1 GCA_019143665.1 GCA_018104345.1 CSIV4 ; do
-makeblastdb -in ${DB}.fasta -dbtype nucl -parse_seqids -out $DB
-THREADS=8
-blastn -query DVS_Mu.fasta -db ${DB} -outfmt 6 -num_threads $THREADS | \
-	awk '$3>95 && $4>=500' | cut -f 2,9,10 | \
-	awk '$2<$3 {print $1"\t"$2"\t"$3} $2>$3 {print $1"\t"$3"\t"$2}' | \
-	bedtools sort -i - | bedtools merge -i - > ${DB}.MU.TEMP.bed
+for TE in TE{1..32}; do
+for SAMP in $( cat ALL0510.txt ); do
+awk '$4>0 {print $1"\t"$2"\t"$3}' ${SAMP}_${TE}.PRECISE_IL.DISC_COUNT.tsv | \
+bedtools sort -i - | bedtools merge -d 100 -i - > ${SAMP}_${TE}.PRECISE.SPLIT_IL_MERGED_FILT.bed
+done
+done
 
-blastn -query DVS_Mu.fasta -db ${DB} -outfmt 6 -num_threads $THREADS | \
-	awk '$3>95 && $4>=500 && $9<$10 {print $2"\t"$9"\t"$10"\t"$1"\t"$12"\t+"} $3>95 && $4>=500 && $9>$10 {print $2"\t"$10"\t"$9"\t"$1"\t"$12"\t-"}' > DVS_MU.${DB}.score.bed
+for TE in TE{1..32}; do
+cat *_${TE}.PRECISE.SPLIT_IL_MERGED_FILT.bed | \
+bedtools sort -i - | bedtools merge -i - > ${TE}_ALL.PRECISE.SPLIT_IL_MERGED_FILT.TMP.bed
+awk '$3-$2>5' ${TE}_ALL.PRECISE.SPLIT_IL_MERGED_FILT.TMP.bed > ${TE}_ALL.0529_PRECISE_IL.TMP.bed
+awk '$3-$2<=5' ${TE}_ALL.PRECISE.SPLIT_IL_MERGED_FILT.TMP.bed | \
+bedtools sort -i - | bedtools merge -d 20 -i - >> ${TE}_ALL.0529_PRECISE_IL.TMP.bed
+bedtools sort -i ${TE}_ALL.0529_PRECISE_IL.TMP.bed > ${TE}_ALL.0529_PRECISE_IL.TMP1.bed
+done
 
-bedtools intersect -wo -a ${DB}.MU.TEMP.bed -b DVS_MU.${DB}.score.bed | awk '{print $1":"$2"-"$3"\t"$0}' | sort -rgk 9,9 | awk '!a[$1]++' > ${DB}.MU.BESTHIT.bed
+```
 
-awk '$11>5000 {print $2"\t"$3-500"\t"$3"\n"$2"\t"$4"\t"$4+500}' ${DB}.MU.BESTHIT.bed > ${DB}.MU.bed
+### # Correspond Precise ILs to the DVS ILs
 
-bedtools getfasta -fi ${DB}.fasta -fo ${DB}.MU.UP_DOWN_500.fasta -bed ${DB}.MU.bed
-blastn -num_threads ${THREADS} -query ${DB}.MU.UP_DOWN_500.fasta -db /zfs/socbd/bwu4/YU/annotation/CK2021 -outfmt 6 | awk '$3>95 && $4>400' > ${DB}.MU.UP_DOWN_500.CK2021.results 
+```bash
+for N in {1..32}; do
+
+# Intact DVS TE member : chr1A:start-end
+#bedtools sort -i NEW${N}_INTACT_COPIES.EXT10.bed | bedtools merge -i - | \
+#awk '{print $1"\t"$2"\t"$3"\t"$1":"$2+10"-"$3-10}' > TE${N}_INTACT.EXT10.bed
+
+# Unintact DVS TE member : chr1A|start-end
+#bedtools intersect -v -a NEW${N}_UNINTACT_COPIES.bed -b TE${N}_INTACT.EXT10.bed **| \
+#**awk '{print $1"\t"$2-10"\t"$3+10"\t"$1"|"$2"-"$3}' > TE${N}_UNINTACT_EXT10.bed
+
+#cat TE${N}_INTACT.EXT10.bed TE${N}_UNINTACT_EXT10.bed | \
+#bedtools sort -i - > TE${N}_DVS.INTACT_UNINTACT.bed 
+
+uniq TE${N}_DVS.INTACT_UNINTACT.bed > TE${N}_DVS.INTACT_UNINTACT.UNIQ.bed
+mv TE${N}_DVS.INTACT_UNINTACT.UNIQ.bed TE${N}_DVS.INTACT_UNINTACT.bed
+
+bedtools intersect -wao -a TE${N}_ALL.0529_PRECISE_IL.TMP1.bed -b TE${N}_DVS.INTACT_UNINTACT.bed | \
+awk '$7=="\." {print $1"\t"$2"\t"$3"\tNOT_DVS"} $7!="\." {print $1"\t"$2"\t"$3"\t"$7}' \
+> TE${N}.PRECISE_IL.DVS.bed
+
+awk '{print $1":"$2"-"$3"\t"$4}' TE${N}.PRECISE_IL.DVS.bed > TE${N}.PRECISE_IL.DVS_MERGED.tsv
+done
+```
+
+### # Calculate precise and disc read counts
+
+```bash
+for TE in TE{1..32}; do
+for SAMP in $( cat ALL0510.txt ); do
+bedtools intersect -c -a ${TE}.PRECISE_IL.DVS.bed \
+-b ${SAMP}_${TE}.PRECISE.SPLIT_IL.bed > ${SAMP}_${TE}.0529_PRECISE_IL.PRE_SPLIT_COUNT.tsv
+bedtools intersect -c -a ${TE}.PRECISE_IL.DVS.bed \
+-b ${TE}/${SAMP}.${TE}.DISC_SUP.bed > ${SAMP}_${TE}.0529_PRECISE_IL.DISC_COUNT.tsv
+done
+done
+```
+
+### # Merge all sample read counts
+
+```bash
+for TE in TE{1..32}; do
+awk '$4~/:/ {print $1":"$2"-"$3"\tINTACT"} 
+$4~/\|/ {print $1":"$2"-"$3"\tNONINTACT"} 
+$4~/DVS/ {print $1":"$2"-"$3"\t"$4}' ${TE}.PRECISE_IL.DVS.bed > ${TE}.TMP.tsv
+
+for SAMP in $( cat ALL0510.txt ); do
+cut -f 5 ${SAMP}_${TE}.0529_PRECISE_IL.PRE_SPLIT_COUNT.tsv | paste ${TE}.TMP.tsv - > ${TE}.TMP1.tsv
+mv ${TE}.TMP1.tsv ${TE}.TMP.tsv
+done
+cat header.txt ${TE}.TMP.tsv > ${TE}_ALL.0529_PRECISE_IL.PRE_SPLIT_COUNT.tsv
+
+awk '$4~/:/ {print $1":"$2"-"$3"\tINTACT"} 
+$4~/\|/ {print $1":"$2"-"$3"\tNONINTACT"} 
+$4~/DVS/ {print $1":"$2"-"$3"\t"$4}' ${TE}.PRECISE_IL.DVS.bed > ${TE}.TMP.tsv
+
+awk 'BEGIN {print "name\tDVS"} {print $1":"$2"-"$3"\t"$4}' ${TE}.PRECISE_IL.DVS.bed > ${TE}.PRECISE_IL.DVS.tsv
+
+for SAMP in $( cat ALL0510.txt ); do
+cut -f 5 ${SAMP}_${TE}.0529_PRECISE_IL.DISC_COUNT.tsv | paste ${TE}.TMP.tsv - > ${TE}.TMP1.tsv
+mv ${TE}.TMP1.tsv ${TE}.TMP.tsv
+done
+cat header.txt ${TE}.TMP.tsv > ${TE}_ALL.0529_PRECISE_IL.DISC_COUNT.tsv
 done
 ```
 
 ```bash
-### Detect SVs in SWO assemblies
-cd /zfs/socbd/bwu4/YU/annotation/FOUR_TE/TE_IN_CITRUS_GENOMES/SWO
-ln /zfs/socbd/bwu4/YU/yu_pacbio/SV/MUMMER/T19.asem.fasta
-ln /zfs/socbd/bwu4/YU/yu_pacbio/SV/MUMMER/SF.asem.fasta
-ln /zfs/socbd/bwu4/YU/yu_pacbio/SV/MUMMER/T78.asem.fasta
-for FASTA in Csiv4.chromosome.fa GCA_018104345.1.fasta GCA_019143665.1.fasta GCA_019144155.1.fasta GCA_019144185.1.fasta GCA_019144195.1.fasta GCA_019144225.1.fasta GCA_019144245.1.fasta SF.asem.fasta T78.asem.fasta ; do
-minimap2 -cx asm5 -t20 --cs CK2021.60.corrected.fasta $FASTA  > asm.paf  # keeping this file is recommended; --cs required!
-sort -k6,6 -k8,8n asm.paf > asm.srt.paf             # sort by reference start coordinate
-k8 paftools.js call asm.srt.paf > ${FASTA}.var.txt
+TE=TE32
+for TE in TE{1..15}; do
+cut -f 2 ${TE}_GENOTYPE_FILT.tsv | sed 1d | sed "s/:/\t/g;s/-/\t/g" > ${TE}_GENOTYPE_FILT.bed
+cut -f 2 ${TE}_GENOTYPE_FILT.tsv | sed 1d > TEMP.tsv
+for SAMP in $( cat ALL0510.txt ); do
+bedtools intersect -c -a ${TE}_GENOTYPE_FILT.bed -b ${SAMP}_${TE}.PRECISE.SPLIT_IL.bed | cut -f 4 | paste TEMP.tsv - > TEMP1.tsv
+mv TEMP1.tsv TEMP.tsv
 done
-for FASTA in Csiv4.chromosome.fa GCA_018104345.1.fasta GCA_019143665.1.fasta GCA_019144155.1.fasta GCA_019144185.1.fasta GCA_019144195.1.fasta GCA_019144225.1.fasta GCA_019144245.1.fasta SF.asem.fasta T78.asem.fasta ; do
-cat ${FASTA}.var.txt | awk '$5==1 && ($4-$3>=50 || $11-$10>=50) && $4-$3<20000 && $11-$10<20000 { if ($4-$3>=50) {print ">"$2"_"$3"_"$4"\t"$7} else {print ">"$2"_"$3"_"$4"\t"$8}}' >> LARGE_INDEL.tsv
+cat header.txt TEMP.tsv > ${TE}_GENOTYPE_FILT.PRECISE_SPLIT_READ_COUNT.tsv
+cut -f 2 ${TE}_GENOTYPE_FILT.tsv | sed 1d > TEMP.tsv
+for SAMP in $( cat ALL0510.txt ); do
+bedtools intersect -c -a ${TE}_GENOTYPE_FILT.bed -b ${TE}/${SAMP}.${TE}.DISC_SUP.bed | cut -f 4 | paste TEMP.tsv - > TEMP1.tsv
+mv TEMP1.tsv TEMP.tsv
 done
-awk '!a[$1]++' LARGE_INDEL.tsv | sed "s/\t/\n/g" > LARGE_INDEL.fasta
-cd-hit-est -r 1 -g 1 -c 0.95 -i LARGE_INDEL.fasta -o LARGE_INDEL.95_90.clusters.fasta -T 0 -aL 0.90 -M 120000 -d 50 -n 10
-cat LARGE_INDEL.95_90.clusters.fasta.clstr | awk '{if ($0~/>Cluster/ && c>3) {print a"\t"b"\t"c;a=$0;b=0;c=0} else if ($0~/*/) {b=$0;c+=1} else {c+=1}}' | sort -n -k7
-```
-
-# Check IL in Pacbio CLR reads
-
-```bash
-# Generate a new masked reference with separate intact DVS MU clstr sequences
-# Put all MU member coordinates in the file DVS_MU.bed
-cd /zfs/socbd/bwu4/YU/annotation/FOUR_TE/09212021_NEW
-bedtools maskfasta -fi /zfs/socbd/bwu4/YU/annotation/CK2021.60.corrected.fasta -bed DVS_MU.bed -fo CK2021.MU_CLSTR_SEPARATE.fasta
-cat /zfs/socbd/bwu4/YU/yu_pacbio/Citrus_sinensis_CK/CORRECTED_DVS_Mu_CLSTR.fasta >> CK2021.MU_CLSTR_SEPARATE.fasta
-
-# To accelerate separating the MU overlapping reads, mapping all raw CLR reads to MU CLSTR sequences: CORRECTED_DVS_Mu_CLSTR.fasta
-minimap2 -t 36 -ax map-pb CORRECTED_DVS_Mu_CLSTR.fasta CK.raw.fasta | samtools view -h -F 4 > CK_CLR.MU_CLSTR.sam
-samtools fasta CK_CLR.MU_CLSTR.sam > CK_CLR.MU_CLSTR.fasta
-
-# Mapping MU overlapping reads to the masked reference with separate intact DVS MU clstr sequences
-minimap2 -t 36 -ax map-pb /zfs/socbd/bwu4/YU/annotation/FOUR_TE/09212021_NEW/CK2021.MU_CLSTR_SEPARATE.fasta CK_CLR.MU_CLSTR.fasta | samtools sort -o CK.CK2021_MU_CLSTR.srt.bam
-
-for SAMP in T19 SF T78 ; do
-cd /zfs/socbd/bwu4/YU/yu_pacbio/Citrus_sinensis_${SAMP}
-minimap2 -t 36 -ax map-pb /zfs/socbd/bwu4/YU/yu_pacbio/Citrus_sinensis_CK/CORRECTED_DVS_Mu_CLSTR.fasta /zfs/socbd/bwu4/YU/yu_pacbio/PACBIO_FASTQ/${SAMP}.fastq.gz | samtools view -h -F 4 > ${SAMP}_CLR.MU_CLSTR.sam
-samtools fasta ${SAMP}_CLR.MU_CLSTR.sam > ${SAMP}_CLR.MU_CLSTR.fasta
-minimap2 -t 36 -ax map-pb /zfs/socbd/bwu4/YU/annotation/FOUR_TE/09212021_NEW/CK2021.MU_CLSTR_SEPARATE.fasta ${SAMP}_CLR.MU_CLSTR.fasta | samtools sort -o ${SAMP}.CK2021_MU_CLSTR.srt.bam
+cat header.txt TEMP.tsv > ${TE}_GENOTYPE_FILT.DISC_READ_COUNT.tsv
 done
 
-samtools view ${SAMP}.CK2021_MU_CLSTR.srt.bam | \
-awk '$5>0 && $3~/Mu/ && $0~/SA:Z/ {match($0,/(SA:Z:[^;]+);/,a); if (a[1]!~/Mu/) print $1"\t"$3"\t"$4"\t"a[1]}' > ${SAMP}.temp.tsv
-cat ${SAMP}.temp.tsv | awk '{match($1,/\/([0-9]+)_([0-9]+)/,b); match($4,/SA:Z:([^,]+),([^,]+),([^,]+),([^,]+),([^,]+),/,a) 
-if (a[4]~/[0-9]+S[0-9A-Z]+[0-9]S/ && a[5]>0) 
-	{
-	match(a[4],/([0-9]+)S([0-9]+)M[0-9]+I([0-9]+)S/,c); 
-	if (c[1]>c[3]) 
-	print a[1]"\t"a[2]-100"\t"a[2]+100"\t"$2
-	else
-	print a[1]"\t"a[2]+c[2]-100"\t"a[2]+c[2]+100"\t"$2
-	}
-else if (a[4]~/[0-9A-Z]+[0-9]S/ && a[5]>0) 
-	{
-	match(a[4],/([0-9]+)M[0-9]+I([0-9]+)S/,c);
-	print a[1]"\t"a[2]+c[1]-100"\t"a[2]+c[1]+100"\t"$2
-	}
-else if (a[4]~/([0-9]+)S[0-9A-Z]+/ && a[5]>0)
-	{
-  print a[1]"\t"a[2]-100"\t"a[2]+100"\t"$2
-  } 
-}' | awk '$2>=0 {print $0} $2<0 {print $1"\t0\t"$3"\t"$4}' | bedtools sort -i - > ${SAMP}.MU_SORT.bed
-bedtools merge -i ${SAMP}.MU_SORT.bed > ${SAMP}.MU_MERGE.bed
-bedtools intersect -c -a ${SAMP}.MU_MERGE.bed -b ${SAMP}.MU_SORT.bed | awk '$4>3' > ${SAMP}.MU_SORT.4ZMW.bed
-bedtools intersect -v -a ${SAMP}.MU_SORT.4ZMW.bed -b ${SAMP}.SPLIT_SUP.CLR_NGS.COUNT.tsv > ${SAMP}.temp.txt
-bedtools intersect -v -a ${SAMP}.temp.txt -b /zfs/socbd/bwu4/YU/annotation/FOUR_TE/TE_IN_CITRUS_GENOMES/CORRECTED_DVS_4TE.bed > ${SAMP}.CLR_SPECIFIC.txt
-
-cat /zfs/socbd/bwu4/YU/annotation/FOUR_TE/09212021_NEW/${SAMP}.SPLIT_SUP.bed /zfs/socbd/bwu4/YU/annotation/FOUR_TE/09212021_NEW/${SAMP}.DISC_SUP.bed > /zfs/socbd/bwu4/YU/annotation/FOUR_TE/09212021_NEW/${SAMP}.MERGE.bed
-bedtools sort -i /zfs/socbd/bwu4/YU/annotation/FOUR_TE/09212021_NEW/${SAMP}.SPLIT_SUP.bed | \
-bedtools merge -d 15 -i - | bedtools intersect -c -a - -b ${SAMP}.MU_SORT.bed | \
-bedtools intersect -c -a - -b /zfs/socbd/bwu4/YU/annotation/FOUR_TE/09212021_NEW/${SAMP}.MERGE.bed > ${SAMP}.SPLIT_SUP.CLR_NGS.COUNT.tsv
 ```
 
-# Transcripts from MU2 in RNAseq data
-
-```bash
-makeblastdb -in /zfs/socbd/bwu4/YU/annotation/CHRA/chrA_mikado.tr.fasta -dbtype nucl -parse_seqids -out CHRA_MIKADO_TR
-makeblastdb -in /zfs/socbd/bwu4/YU/annotation/CHRB/chrB_mikado.tr.fasta -dbtype nucl -parse_seqids -out CHRB_MIKADO_TR
-
-blastn -query CORRECTED_DVS_Mu_CLSTR.fasta -db CHRA_MIKADO_TR -num_threads 8 -outfmt 6 \
-| awk '$3>95 && $4>1000 && $1~/Mu2/' | cut -f 2 | sort -u | \
-cdbyank  /zfs/socbd/bwu4/YU/annotation/CHRA/chrA_mikado.tr.fasta.cidx > RNAseq_asembly.MU2.fasta
-
-blastn -query CORRECTED_DVS_Mu_CLSTR.fasta -db CHRB_MIKADO_TR -num_threads 8 -outfmt 6 \
-| awk '$3>95 && $8>6100 && $1=="DVS_Mu2_1"' | cut -f 2 | sort -u > chrB.MU2.ID.txt
-
-/zfs/socbd/bwu4/YU/annotation/CHRA/MIKDAO_CHRA/5-mikado-permissive/pick/permissive/
-
-blastn -query CORRECTED_DVS_Mu_CLSTR.fasta -db chrB_PERMISSIVE -num_threads 8 -outfmt 6 \
-| awk '$3>95 && $8>6100 && $1=="DVS_Mu2_1"' | cut -f 2 | sort -u > chrB.MU2.ID.txt
-
-gffread /zfs/socbd/bwu4/YU/annotation/CHRA/MIKDAO_CHRA/5-mikado-lenient/pick/permissive/mikado-permissive.loci.gff3 -g /zfs/socbd/bwu4/YU/annotation/CHRA/chrA.fasta -w chrA_mikado.permissive.tr.fasta
-gffread /zfs/socbd/bwu4/YU/annotation/CHRA/MIKDAO_CHRA/5-mikado-lenient/pick/lenient/mikado-lenient.loci.gff3 -g /zfs/socbd/bwu4/YU/annotation/CHRA/chrA.fasta -w chrA_mikado.lenient.tr.fasta
-
-makeblastdb -in chrA_mikado.permissive.tr.fasta -dbtype nucl -parse_seqids -out chrA_PERMISSIVE
-makeblastdb -in chrA_mikado.lenient.tr.fasta -dbtype nucl -parse_seqids -out chrA_LENIENT
-blastn -query CORRECTED_DVS_Mu_CLSTR.fasta -db chrA_LENIENT -num_threads 8 -outfmt 6 | awk '$3>95 && $8>6100 && $1=="DVS_Mu2_1" && $9>$10'
-blastn -query CORRECTED_DVS_Mu_CLSTR.fasta -db chrA_LENIENT -num_threads 8 -outfmt 6 \
-| awk '$3>95 && $8>6100 && $1=="DVS_Mu2_1" && $9>$10' | cut -f 2 | sort -u > chrA.MU2.ID.txt
-
-gffread /zfs/socbd/bwu4/YU/annotation/CHRB/MIKADO/5-mikado-lenient/pick/lenient/mikado-lenient.loci.gff3 -g /zfs/socbd/bwu4/YU/annotation/CHRB/chrB.fasta -w chrB_mikado.lenient.tr.fasta
-makeblastdb -in chrB_mikado.lenient.tr.fasta -dbtype nucl -parse_seqids -out chrB_LENIENT
-blastn -query CORRECTED_DVS_Mu_CLSTR.fasta -db chrB_LENIENT -num_threads 8 -outfmt 6 \
-| awk '$3>95 && $8>6100 && $1=="DVS_Mu2_1" && $9>$10' | cut -f 2 | sort -u > chrB.MU2.ID.txt
-
-cdbfasta chrA_mikado.lenient.tr.fasta
-cdbfasta chrB_mikado.lenient.tr.fasta
-cat chrA.MU2.ID.txt | cdbyank chrA_mikado.lenient.tr.fasta.cidx - > chrA.MU2.LENIENT.fasta
-cat chrB.MU2.ID.txt | cdbyank chrB_mikado.lenient.tr.fasta.cidx - > chrB.MU2.LENIENT.fasta
-```
-
-# Comparison between SWO and PTR Mu sequences
-
-```bash
-sed -i 's/(+)//g;s/(-)//g' CORRECTED_DVS_Mu_CLSTR.fasta
-cdbfasta CORRECTED_DVS_Mu_CLSTR.fasta
-for MU in $( grep ">" CORRECTED_DVS_Mu_CLSTR.fasta | sed "s/>//g" ); do cdbyank CORRECTED_DVS_Mu_CLSTR.fasta.cidx -a $MU > ${MU}.fasta ; done
-sed -i 's/(-)//g;s/(+)//g' PTR_FOUR_TE.fasta
-cdbfasta PTR_FOUR_TE.fasta
-for MU in $( grep ">" PTR_FOUR_TE.fasta | sed "s/>//g" ); do cdbyank PTR_FOUR_TE.fasta.cidx -a $MU > ${MU}.fasta ; done
-mkdir DVS_PTR
-mv *_Mu[12]_*.fasta DVS_PTR
-cd DVS_PTR
-for DVS in DVS_Mu1*.fasta ; do for PTR in PTR_Mu1*.fasta ; do lalign36 $DVS $PTR 5 > ${DVS}_${PTR}.align.txt ; done ; done
-
-```
-
-## PAIRWISE_ALIGNMENT_DISTANCE.py Pairwise sequence identity calculation
+### # NEW_SUM_SPLIT_DISC_COUNT.py
 
 ```python
-from Bio.Phylo.TreeConstruction import DistanceCalculator
-from Bio import AlignIO
-import sys
-import os
-aln = AlignIO.read(sys.argv[2],"fasta")
-calculator = DistanceCalculator(sys.argv[1])
-dm = calculator.get_distance(aln)
-print(dm.names[0],dm.names[0],dm[0][1],sep="\t")
-```
-
-## Calculate pairwise identity among transposons and genes
-
-```bash
-ls -1 PTR_Mu1_?.fasta > PTR_Mu1.list
-ls -1 PTR_Mu2_?.fasta > PTR_Mu2.list
-ls -1 DVS_Mu2_?.fasta DVS_Mu2_??.fasta > DVS_Mu2.list
-ls -1 DVS_Mu1_?.fasta DVS_Mu1_??.fasta > DVS_Mu1.list
-for ONE in $( cat DVS_Mu1.list ) ; do
-for TWO in $( cat PTR_Mu1.list ) ; do
-cat $ONE $TWO > ${ONE%.fasta}_$TWO
-muscle -in ${ONE%.fasta}_$TWO -out ${ONE%.fasta}_${TWO%fasta}aligned.fasta 
-trimal -nogaps -in ${ONE%.fasta}_${TWO%fasta}aligned.fasta > ${ONE%.fasta}_${TWO%fasta}aligned.nogaps.fasta
-./PAIRWISE_ALIGNMENT_DISTANCE.py identity ${ONE%.fasta}_${TWO%fasta}aligned.nogaps.fasta >> PTR_DVS_MU_DIST.txt
-done
-done
-```
-
-## Genetic distance control group calculation
-
-```bash
-cd /zfs/socbd/bwu4/YU/annotation/ORTHOFINDER/ORTHO07012021/Results_Jul01/Single_Copy_Orthologue_Sequences
-for FA in *.fa ; do grep ">" $FA | sed "s/>//g" | \
-awk '{ if ($0~/DSWO[0-9]A/ || $0~/Ptrif/) print $0}' \
-> ${FA%fa}DVSA_PTR.txt; done
-for FA in *.fa ; do grep ">" $FA | sed "s/>//g" | \
-awk '{ if ($0~/DSWO[0-9]B/ || $0~/Ptrif/) print $0}' \
-> ${FA%fa}DVSB_PTR.txt; done
-cd /zfs/socbd/bwu4/REF/DVS
-awk '$3~/transcript/ && match($9,/ID=([^;]*);/,a) {print $1"\t"$4"\t"$5"\t"a[1]"\t.\t"$7 }' \
-CK2021.FINAL.0403.gff3 > CK2021.tr_genomic.bed
-bedtools getfasta -s -fi CK2021.60.corrected.fasta -fo \
-CK2021.tr_genomic.fasta -nameOnly -bed CK2021.tr_genomic.bed
-mv CK2021.tr_genomic.fasta /zfs/socbd/bwu4/YU/annotation/FOUR_TE/TE_IN_CITRUS_GENOMES/DVS_PTR/CONTROL
-awk '$3~/mRNA/ && match($9,/ID=([^;]*);/,a) {print $1"\t"$4"\t"$5"\t"a[1]"\t.\t"$7 }' \
-Ptrifoliata_565_v1.3.1.gene.gff3 > PTR.tr_genomic.bed
-bedtools getfasta -s -fi Ptrifoliata_565_v1.3.fa -fo PTR.tr_genomic.fasta \
--nameOnly -bed PTR.tr_genomic.bed
-mv Ptrifoliata_565_v1.3.fa /zfs/socbd/bwu4/YU/annotation/FOUR_TE/TE_IN_CITRUS_GENOMES/DVS_PTR/CONTROL
-cat CK2021.tr_genomic.fasta Ptrifoliata_565_v1.3.fa > DVS_PTR.REF.fasta
-sed -i 's/(+)//g;s/(-)//g' DVS_PTR.REF.fasta
-cdbfasta DVS_PTR.REF.fasta
-ls -1 /zfs/socbd/bwu4/YU/annotation/ORTHOFINDER/ORTHO07012021/Results_Jul01/Single_Copy_Orthologue_Sequences/*.DVSA_PTR.txt | \
-head -n 500 > 500OG.DVSA_PTR.txt
-ls -1 /zfs/socbd/bwu4/YU/annotation/ORTHOFINDER/ORTHO07012021/Results_Jul01/Single_Copy_Orthologue_Sequences/*.DVSB_PTR.txt | \
-head -n 5000 | tail -n 500 > 500OG.DVSB_PTR.txt
-
-for TXT in $( cat 500OG.DVSA_PTR.txt ); do cat $TXT | \
-cdbyank DVS_PTR.REF.fasta.cidx - > ${TXT%txt}fasta ; done
-
-for TXT in $( cat 500OG.DVSB_PTR.txt ); do cat $TXT | \
-cdbyank DVS_PTR.REF.fasta.cidx - > ${TXT%txt}fasta ; done
-mv /zfs/socbd/bwu4/YU/annotation/ORTHOFINDER/ORTHO07012021/Results_Jul01/Single_Copy_Orthologue_Sequences/OG*.DVS*.fasta ./
-```
-
-```bash
-for OG in OG*.DVS*.fasta ; do
-muscle -in $OG -out ${OG%fasta}aligned.fasta
-trimal -nogaps -in ${OG%fasta}aligned.fasta > ${OG%fasta}aligned.nogaps.fasta
-../PAIRWISE_ALIGNMENT_DISTANCE.py identity  ${OG%fasta}aligned.nogaps.fasta >> CONTROL_DIST.txt
-done
-
-awk '{ if ( $4-$3>=4500 && $12>0 ) print $1"\t"$3"\t"$4"\tDVS"NR"\t.\t+\t"$6"\t"$8"\t"$9"\tPTR"NR"\t.\t"$5}' \
-PTR.DVS_INTER_GENE.5000.paf > DVS_PTR.INTER_GENE.OVER4500.tsv
-```
-
-```bash
-# shuf -n 1000 DVS_PTR.INTER_GENE.OVER4500.tsv > DVS_PTR.INTER_GENE.OVER4500.RAN1000.tsv
-cut -f 7,8,9,10,11,12 DVS_PTR.INTER_GENE.OVER4500.tsv > PTR.OVER4500.bed
-
-awk '{ if ( $12>0 && $4-$3>500 ) print $6"\t"$8"\t"$9 }' PTR.DVS_INTER_GENE.5000.paf | \
-bedtools sort -i - > PTR_COVERED.bed
-
-cut -f 7,8,9,10,11,12 DVS_PTR.INTER_GENE.OVER4500.tsv > PTR.OVER4500.bed
-
-bedtools intersect -wa -c -a PTR.OVER4500.bed -b PTR_COVERED.bed | \
-awk '$7==1' | cut -f 4 > PTR.DVS_UNIQ.ID.txt
-
-#/usr/bin/env python3
+#!/usr/bin/env python3
 import pandas as pd
-df = pd.read_table('DVS_PTR.INTER_GENE.OVER4500.tsv', header=None)
-df1 = pd.read_table('PTR.DVS_UNIQ.ID.txt', header=None)
-df.loc[df[10].isin(df1[0])].to_csv('ORG.DVS_PTR.1VS1.tsv', index=False, header=False)
-### python code ends
+import sys
 
-sed -i "s/\tscaffold/\nscaffold/g" ORG.DVS_PTR.1VS1.tsv
+TE=sys.argv[1]
+SPLIT=pd.read_table(f'{TE}_ALL.0529_PRECISE_IL.PRE_SPLIT_COUNT.tsv', header=0)
+SPLIT.drop(['DVS','Unnamed: 231'], axis=1, inplace=True)
+DISC=pd.read_table(f'{TE}_ALL.0529_PRECISE_IL.DISC_COUNT.tsv', header=0)
+DISC.drop(['DVS','Unnamed: 231'], axis=1, inplace=True)
+IL_DVS=pd.read_table(f'{TE}.PRECISE_IL.DVS.tsv', header=0)
+SPLIT=SPLIT.merge(IL_DVS,on='name')
+DISC=DISC.merge(IL_DVS,on='name')
+SPLIT_DVS=SPLIT.loc[~SPLIT['DVS'].str.contains('DVS')]
+SPLIT_NONDVS=SPLIT.loc[SPLIT['DVS'].str.contains('DVS')]
+DISC_DVS=DISC.loc[~DISC['DVS'].str.contains('DVS')]
+DISC_NONDVS=DISC.loc[DISC['DVS'].str.contains('DVS')]
+SPLIT_DVS = SPLIT_DVS.set_index('name').groupby('DVS').sum().reset_index()
+DISC_DVS = DISC_DVS.set_index('name').groupby('DVS').sum().reset_index()
+SPLIT_DVS['name']=SPLIT_DVS['DVS']
+DISC_DVS['name']=DISC_DVS['DVS']
+SPLIT=pd.concat([SPLIT_DVS,SPLIT_NONDVS])
+DISC=pd.concat([DISC_DVS,DISC_NONDVS])
 
-split -l 2 ORG.DVS_PTR.1VS1.tsv DVS_PTR.1VS1.
+SPLIT.to_csv(f'ALL_SAMP.{TE}_GENOTYPE_0529.SPLIT_READ_COUNT.Unfilt.tsv', sep="\t", header=True, index=False)
+DISC.to_csv(f'ALL_SAMP.{TE}_GENOTYPE_0529.DISC_READ_COUNT.Unfilt.tsv', sep="\t", header=True, index=False)
 
-for FILE in DVS_PTR.1VS1.* ; do 
-bedtools getfasta -s -nameOnly -fi CK2021.INTER_GENE.5000.PTR.fasta -fo ${FILE}.fas -bed $FILE
-done
+SPLIT.set_index(['name', 'DVS'], inplace=True)
+DISC.set_index(['name', 'DVS'], inplace=True)
 
-cd /zfs/socbd/bwu4/YU/annotation/FOUR_TE/TE_IN_CITRUS_GENOMES/DVS_PTR/CONTROL
-mv /zfs/socbd/bwu4/REF/PTR/DVS_PTR.1VS1.*.fas ./
+SUM=SPLIT+DISC
+SUM.reset_index().to_csv(f'ALL_SAMP.{TE}_GENOTYPE_0529.SPLIT_DISC_READ_SUM.Unfilt.tsv', sep="\t", header=True, index=False)
 
-for OG in DVS_PTR.1VS1.*.fas ; do
-muscle -in $OG -out ${OG%fas}aligned.fasta
-trimal -nogaps -in ${OG%fas}aligned.fasta > ${OG%fas}aligned.nogaps.fasta
-../PAIRWISE_ALIGNMENT_DISTANCE.py identity  ${OG%fas}aligned.nogaps.fasta >> CONTROL_DIST.txt
-done
+SPLIT_MASK = SPLIT.mask(SPLIT>0, 1)
+DISC_MASK = DISC * SPLIT.mask(SPLIT>0, 1)
+SPLIT_MASK = SPLIT * DISC.mask(DISC>0, 1)
 
-arrVar=()
-for DVS1 in $( cat PTR_Mu2.list ); do
-arrVar=( ${arrVar[@]} $DVS1 )
-for DVS2 in $( cat PTR_Mu2.list ); do
-if [[ " ${arrVar[*]} " =~ " $DVS2 " ]] ; then
-continue
-else
-cat $DVS1 $DVS2 > ${DVS1%.fasta}_${DVS2}
-muscle -in ${DVS1%.fasta}_${DVS2} -out ${DVS1%.fasta}_${DVS2%fasta}aligned.fasta
-trimal -nogaps -in ${DVS1%.fasta}_${DVS2%fasta}aligned.fasta > ${DVS1%.fasta}_${DVS2%fasta}aligned.nogaps.fasta
-./PAIRWISE_ALIGNMENT_DISTANCE.py identity ${DVS1%.fasta}_${DVS2%fasta}aligned.nogaps.fasta >> PTR_DVS_MU_DIST.txt
-fi
-done
-done
+SUM=SPLIT_MASK+DISC_MASK
+SUM=SUM.mask(SUM < 2, 0)
+SUM=SUM.mask(SUM > 1, 1)
+SUM.reset_index(inplace=True)
+SUM.to_csv(f'{TE}_0529_GENOTYPE.tsv', sep="\t", header=True, index=False)
 
-arrVar=()
-for TE1 in $( cat DVS_PTR_Mu2.list ); do
-arrVar=( ${arrVar[@]} $TE1 )
-for TE2 in $( cat DVS_PTR_Mu2.list ); do
-if [[ " ${arrVar[*]} " =~ " $TE2 " ]] ; then
-continue
-else
-needle -gapopen 10.0 -gapextend 0.5  -brief -outfile ${TE1%.fasta}_${TE2%.fasta}.needle $TE1 $TE2
-a=$( grep "# 1" ${TE1%.fasta}_${TE2%.fasta}.needle | awk -F " " '{print $3}' )
-b=$( grep "# 2" ${TE1%.fasta}_${TE2%.fasta}.needle | awk -F " " '{print $3}' )
-c=$( grep Identity ${TE1%.fasta}_${TE2%.fasta}.needle | tr -s ' ' | awk -F " " '{match($3,/([0-9]+)\/([0-9]+)/,a); print a[1]}' )
-d=$( grep Gaps ${TE1%.fasta}_${TE2%.fasta}.needle | tr -s ' ' | awk -F " " '{match($3,/([0-9]+)\/([0-9]+)/,a); print a[1]}' )
-e=$( grep Identity ${TE1%.fasta}_${TE2%.fasta}.needle | tr -s ' ' | awk -F " " '{match($3,/([0-9]+)\/([0-9]+)/,a); print a[2]}' )
-echo -e $a"\t"$b"\t"$c"\t"$d"\t"$e >> NEEDLE_MU2_DIST.tsv
-fi
-done
-done
-
-for FAS in DVS_PTR.1VS1.*.fas ; do
-split -l 2 -d $FAS ${FAS%.fas}
-needle -gapopen 10.0 -gapextend 0.5 -brief -outfile ${FAS%.fas}.needle ${FAS%.fas}00 ${FAS%.fas}01
-a=$( grep "# 1" ${FAS%.fas}.needle | awk -F " " '{print $3}' )
-b=$( grep "# 2" ${FAS%.fas}.needle | awk -F " " '{print $3}' )
-c=$( grep Identity ${FAS%.fas}.needle | tr -s ' ' | awk -F " " '{match($3,/([0-9]+)\/([0-9]+)/,a); print a[1]}' )
-d=$( grep Gaps ${FAS%.fas}.needle | tr -s ' ' | awk -F " " '{match($3,/([0-9]+)\/([0-9]+)/,a); print a[1]}' )
-e=$( grep Identity ${FAS%.fas}.needle | tr -s ' ' | awk -F " " '{match($3,/([0-9]+)\/([0-9]+)/,a); print a[2]}' )
-echo -e $a"\t"$b"\t"$c"\t"$d"\t"$e >> NEEDLE_CONTROL_DIST.tsv
-done
-
-TE1="PTR_Mu1_3.fasta"
-TE2="PTR_Mu1_5.fasta"
-needle -gapopen 10.0 -gapextend 0.5  -brief -outfile ${TE1%.fasta}_${TE2%.fasta}.needle $TE1 $TE2
-a=$( grep "# 1" ${TE1%.fasta}_${TE2%.fasta}.needle | awk -F " " '{print $3}' )
-b=$( grep "# 2" ${TE1%.fasta}_${TE2%.fasta}.needle | awk -F " " '{print $3}' )
-c=$( grep Identity ${TE1%.fasta}_${TE2%.fasta}.needle | tr -s ' ' | awk -F " " '{match($3,/([0-9]+)\/([0-9]+)/,a); print a[1]}' )
-d=$( grep Gaps ${TE1%.fasta}_${TE2%.fasta}.needle | tr -s ' ' | awk -F " " '{match($3,/([0-9]+)\/([0-9]+)/,a); print a[1]}' )
-e=$( grep Identity ${TE1%.fasta}_${TE2%.fasta}.needle | tr -s ' ' | awk -F " " '{match($3,/([0-9]+)\/([0-9]+)/,a); print a[2]}' )
-echo -e $a"\t"$b"\t"$c"\t"$d"\t"$e
+SUM=SPLIT_MASK+DISC_MASK
+SUM=SUM.mask(SUM < 2, 0)
+SUM.reset_index(inplace=True)
+SUM.to_csv(f'ALL_SAMP.{TE}_GENOTYPE_0529.SPLIT_DISC.READ_COUNT_SUM.tsv', sep="\t", header=True, index=False)
 ```
 
-# Kmer statistics in the reference genomes
+### # SUM_SPLIT_DISC_COUNT_06062022.py
+
+```python
+#!/usr/bin/env python3
+import pandas as pd
+import sys
+
+TE=sys.argv[1]
+SPLIT=pd.read_table(f'{TE}_ALL.0529_PRECISE_IL.PRE_SPLIT_COUNT.tsv', header=0)
+SPLIT.drop(['DVS','Unnamed: 231'], axis=1, inplace=True)
+DISC=pd.read_table(f'{TE}_ALL.0529_PRECISE_IL.DISC_COUNT.tsv', header=0)
+DISC.drop(['DVS','Unnamed: 231'], axis=1, inplace=True)
+IL_DVS=pd.read_table(f'{TE}.PRECISE_IL.DVS.tsv', header=0)
+SPLIT=SPLIT.merge(IL_DVS,on='name')
+DISC=DISC.merge(IL_DVS,on='name')
+SPLIT_DVS=SPLIT.loc[~SPLIT['DVS'].str.contains('DVS')]
+SPLIT_NONDVS=SPLIT.loc[SPLIT['DVS'].str.contains('DVS')]
+DISC_DVS=DISC.loc[~DISC['DVS'].str.contains('DVS')]
+DISC_NONDVS=DISC.loc[DISC['DVS'].str.contains('DVS')]
+SPLIT_DVS = SPLIT_DVS.set_index('name').groupby('DVS').sum().reset_index()
+DISC_DVS = DISC_DVS.set_index('name').groupby('DVS').sum().reset_index()
+SPLIT_DVS['name']=SPLIT_DVS['DVS']
+DISC_DVS['name']=DISC_DVS['DVS']
+SPLIT=pd.concat([SPLIT_DVS,SPLIT_NONDVS])
+DISC=pd.concat([DISC_DVS,DISC_NONDVS])
+
+SPLIT.to_csv(f'ALL_SAMP.{TE}_GENOTYPE_0529.SPLIT_READ_COUNT.Unfilt.tsv', sep="\t", header=True, index=False)
+DISC.to_csv(f'ALL_SAMP.{TE}_GENOTYPE_0529.DISC_READ_COUNT.Unfilt.tsv', sep="\t", header=True, index=False)
+
+SPLIT.set_index(['name', 'DVS'], inplace=True)
+DISC.set_index(['name', 'DVS'], inplace=True)
+
+SUM=SPLIT+DISC
+SUM.reset_index().to_csv(f'ALL_SAMP.{TE}_GENOTYPE_0529.SPLIT_DISC_READ_SUM.Unfilt.tsv', sep="\t", header=True, index=False)
+
+SUM = SUM.mask(SUM<2, 0)
+SUM.reset_index().to_csv(f'ALL_SAMP.{TE}_GENOTYPE_0606.SPLIT_DISC.FILT_READ_COUNT_SUM.tsv', sep="\t", header=True, index=False)
+#SPLIT_MASK = SPLIT.mask(SPLIT>0, 1)
+#DISC_MASK = DISC * SPLIT.mask(SPLIT>0, 1)
+#SPLIT_MASK = SPLIT * DISC.mask(DISC>0, 1)
+
+#SUM=SPLIT_MASK+DISC_MASK
+#SUM=SUM.mask(SUM < 2, 0)
+SUM=SUM.mask(SUM > 1, 1)
+#SUM.reset_index(inplace=True)
+SUM.reset_index().to_csv(f'{TE}_0606_GENOTYPE.tsv', sep="\t", header=True, index=False)
+
+#SUM=SPLIT_MASK+DISC_MASK
+#SUM=SUM.mask(SUM < 2, 0)
+#SUM.reset_index(inplace=True)
+#SUM.to_csv(f'ALL_SAMP.{TE}_GENOTYPE_0529.SPLIT_DISC.READ_COUNT_SUM.tsv', sep="\t", header=True, index=False)
+```
+
+### # Merge old and REST MASK_W_count and W_count
 
 ```bash
-cd /zfs/socbd/bwu4/YU/annotation/FOUR_TE/09212021_NEW/KMER_ANALYSIS
-for KMER in {47..64}; do 
-jellyfish count -C -m $KMER -s 600M -t 24 ../CK2021.09282021.MASKED.fasta 
-mv mer_counts.jf mer${KMER}_counts.jf 
+# Correspond new ILs with the old ILs
+for TE in TE{1..32}; do 
+bedtools intersect -wo -a GENOTYPE/${TE}_0529_GENOTYPE_NONDVS.bed -b GENOTYPE/${TE}_GENOTYPE.bed | \
+awk '!a[$4]++ {print $4"\t"$8}' > ${TE}.GT0529_OLDIL.tsv 
 done
 
-for KMER in {65..75}; do 
-jellyfish count -C -m $KMER -s 600M -t 24 ../CK2021.09282021.MASKED.fasta 
-mv mer_counts.jf mer${KMER}_counts.jf 
+for TE in TE{1..32} ; do cat ALL0510.txt | parallel -j 20 ./MERGE_OLD_REST_W_COUNT.py {} $TE ; done
+
+for TE in TE{1..32} ; do
+rm -f ${TE}.0529IL_ALLELE_MASKED.txt
+cut -f 4 ${TE}.A_IL_BMASKED.tsv | sed "s/:/\t/g;s/-/\t/g" | awk '{print $1"\t"$2+500"\t"$3-500}' | bedtools intersect -wo -a GENOTYPE/${TE}_0529_GENOTYPE_NONDVS.bed -b - | cut -f 4 >> ${TE}.0529IL_ALLELE_MASKED.txt
+cut -f 4 ${TE}.B_IL_AMASKED.tsv | sed "s/:/\t/g;s/-/\t/g" | awk '{print $1"\t"$2+500"\t"$3-500}' | bedtools intersect -wo -a GENOTYPE/${TE}_0529_GENOTYPE_NONDVS.bed -b - | cut -f 4 >> ${TE}.0529IL_ALLELE_MASKED.txt
+cut -f 4 ${TE}_REST.A_IL_BMASKED.tsv | sed "s/:/\t/g;s/-/\t/g" | awk '{print $1"\t"$2+500"\t"$3-500}' | bedtools intersect -wo -a GENOTYPE/${TE}_0529_GENOTYPE_NONDVS.bed -b - | cut -f 4 >> ${TE}.0529IL_ALLELE_MASKED.txt
+cut -f 4 ${TE}_REST.B_IL_AMASKED.tsv | sed "s/:/\t/g;s/-/\t/g" | awk '{print $1"\t"$2+500"\t"$3-500}' | bedtools intersect -wo -a GENOTYPE/${TE}_0529_GENOTYPE_NONDVS.bed -b - | cut -f 4 >> ${TE}.0529IL_ALLELE_MASKED.txt
+sort -u ${TE}.0529IL_ALLELE_MASKED.txt > ${TE}.0529IL_ALLELE_MASKED.txt1
+mv ${TE}.0529IL_ALLELE_MASKED.txt1 ${TE}.0529IL_ALLELE_MASKED.txt
 done
 
-for KMER in {86..91}; do 
-jellyfish count -C -m $KMER -s 600M -t 16 ../CK2021.09282021.MASKED.fasta 
-mv mer_counts.jf mer${KMER}_counts.jf 
-done
-
-KMER=65
-jellyfish histo mer${KMER}_counts.jf | sed "s/ /\t/g" > mer${KMER}.count
-awk 'BEGIN {a=0} NR==1 {b=$2} {a+=$1*$2} END {print b"\t"a"\t"b/a}' mer${KMER}.count
-
-for KMER in {20..100}; do
-if test ! -f mer${KMER}.count; then
-jellyfish histo mer${KMER}_counts.jf | sed "s/ /\t/g" > mer${KMER}.count
-fi
-echo mer${KMER}.count $( awk 'BEGIN {a=0} NR==1 {b=$2} {a+=$1*$2} END {print b"\t"a"\t"b/a}' mer${KMER}.count) >> UNIQ_KMER_STA.txt
-done
 ```
 
-# SWO assembly IL SUL statistics
-
-### IL_SUL_ANALYSIS.sh
-
-```bash
-#!/bin/bash
-
-for LEN in {20..100}; do
-b=$( sed -n ${1}p ${2} | awk -v x=${LEN} '$3-$2>50 {print $1"\t"$2-x-1"\t"$2-1} $3-$2<50 {print $1"\t"$3-x"\t"$3}' | \
-bedtools getfasta -fi /zfs/socbd/bwu4/YU/annotation/CK2021.60.corrected.fasta -bed - | tail -n 1)
-a=$( jellyfish query mer${LEN}_counts.jf $b | cut -d " " -f 2 )
-echo $a
-if test $a -eq 1 ; then
-sed -n ${1}p ${2} | awk -v x=${LEN} '{print $1":"$2"-"$3"\t"x"\tLEFT"}' >> ${3}
-break
-fi
-if test $a -eq 0 ; then
-sed -n ${1}p ${2} | awk -v x=${LEN} '{print $1":"$2"-"$3"\t"x"_0\tLEFT"}' >> ${3}
-break
-fi
-if test $LEN -eq 100 ; then
-sed -n ${1}p ${2} | awk -v x=${LEN} '{print $1":"$2"-"$3"\t"x"_2\tLEFT"}' >> ${3}
-fi
-done
-for LEN in {20..100}; do
-b=$( sed -n ${1}p ${2} | awk -v x=${LEN} '$3-$2>50 {print $1"\t"$3"\t"$3+x} $3-$2<50 {print $1"\t"$2-1"\t"$2+x-1}' | \
-bedtools getfasta -fi /zfs/socbd/bwu4/YU/annotation/CK2021.60.corrected.fasta -bed - | tail -n 1 )
-a=$( jellyfish query mer${LEN}_counts.jf $b | cut -d " " -f 2 )
-echo $a
-if test $a -eq 1 ; then
-sed -n ${1}p ${2} | awk -v x=${LEN} '{print $1":"$2"-"$3"\t"x"\tRIGHT"}' >> ${3}
-break
-fi
-if test $a -eq 0 ; then
-sed -n ${1}p ${2} | awk -v x=${LEN} '{print $1":"$2"-"$3"\t"x"_0\tRIGHT"}' >> ${3}
-break
-fi
-if test $LEN -eq 100 ; then
-sed -n ${1}p ${2} | awk -v x=${LEN} '{print $1":"$2"-"$3"\t"x"_2\tRIGHT"}' >> ${3}
-fi
-done
-```
-
-```bash
-for N in {1..126}; do
-./IL_SUL_ANALYSIS.sh $N SWO_ASSEM_IL.txt IL_SUL.tsv
-done
-
-echo -e "chr5B\t48342312\t48342412" |  bedtools getfasta -fi /zfs/socbd/bwu4/YU/annotation/CK2021.60.corrected.fasta -bed -
-```
-
-### MU END SUL statistics
-
-```bash
-for i in {1..22}; do
-for LEN in {20..100}; do
-b=$( sed -n ${i}p MU_END.txt | awk -v x=${LEN} '$2==1 {print $1"\t0\t"x} $2>1 {print $1"\t"$2-x"\t"$2}' | \
-bedtools getfasta -fi ../CK2021.09282021.MASKED.fasta -bed - | tail -n 1)
-a=$( jellyfish query mer${LEN}_counts.jf $b | cut -d " " -f 2 )
-echo $a
-if test $a -eq 1 ; then
-sed -n ${i}p MU_END.txt | awk -v x=${LEN} '{print $1"\t"$2"\t"x}' >> MU_END_SUL.tsv
-break
-fi
-if test $a -eq 0 ; then
-sed -n ${i}p MU_END.txt | awk '{print $1"\t"$2"\t0"}' >> MU_END_SUL.tsv
-fi
-if test $LEN -eq 100 ; then
-sed -n ${i}p MU_END.txt | awk '{print $1"\t"$2"\t101"}' >> MU_END_SUL.tsv
-fi
-done
-done
-```
-
-# Fix the overlapping between multiple SPLIT IL with a single DISC IL
-
-```bash
-cd /zfs/socbd/bwu4/YU/annotation/FOUR_TE/09212021_NEW
-cat *.DISC_SUP.bed | grep Mu2 > ALL.MU2_DISC.bed
-cat *.DISC_SUP.bed | grep Mu1 > ALL.MU1_DISC.bed
-
-bedtools intersect -wo -a ALL.MU2_DISC.UNIQ.bed -b ALL_MU2.2SUP.bed | cut -f 1,2,3 \
-| sort | uniq -d | bedtools sort -i - | bedtools merge -i - > MU2.DISC.2SPLIT_IL.bed
-bedtools intersect -wo -a ALL.MU1_DISC.UNIQ.bed -b ALL_MU1.2SUP.bed | cut -f 1,2,3 \
-| sort | uniq -d | bedtools sort -i - | bedtools merge -i - > MU1.DISC.2SPLIT_IL.bed
-
-bedtools intersect -wo -a MU1.DISC.2SPLIT_IL.bed -b ALL_MU1.2SUP.bed > MU1.DISC.2SPLIT.IL.intersect
-bedtools intersect -wo -a MU2.DISC.2SPLIT_IL.bed -b ALL_MU2.2SUP.bed > MU2.DISC.2SPLIT.IL.intersect
-
-cut -f 4,5,6 MU1.DISC.2SPLIT.IL.intersect > MU1.DISC.2SPLIT.IL.bed
-cut -f 4,5,6 MU2.DISC.2SPLIT.IL.intersect > MU2.DISC.2SPLIT.IL.bed
-```
-
-# Mutant-type cell ratio analysis
-
-```bash
-# Add masked intact and non-intact MULE regions in DVS_MU.bed
-# Sort the DVS_MU.bed file
-bedtools sort -i DVS_MU.bed > DVS_MU.including_nonintact.sorted.bed
-
-# Extend 20 bp at the two terminals of DVS MULEs
-awk '{print $1"\t"$2-20"\t"$3+20}' DVS_MU.including_nonintact.sorted.bed > DVS_MU.including_nonintact.sorted.EXT20.bed
-
-# Remove DVS MU ILs from all the MU2 and MU1 ILs 
-bedtools intersect -v -wa -a ALL_MU2.2SUP.CORRECTED.bed -b DVS_MU.including_nonintact.sorted.EXT20.bed > ALL_MU2.2SUP.nonDVS.bed
-bedtools intersect -v -wa -a ALL_MU1.2SUP.CORRECTED.bed -b DVS_MU.including_nonintact.sorted.EXT20.bed > ALL_MU1.2SUP.nonDVS.bed
-
-# Output surrounding 1000 bp sequences of filtered MULE ILs and separate those on DVS_A and DVS_B
-awk '$1~/A/ {print $1"\t"$2-500"\t"$3+500}' ALL_MU1.2SUP.nonDVS.bed > ALL_MU1.2SUP.nonDVS.chrA.SURR500.bed
-
-awk '$1~/A/ {print $1"\t"$2-500"\t"$3+500}' ALL_MU2.2SUP.nonDVS.bed > ALL_MU2.2SUP.nonDVS.chrA.SURR500.bed
-
-# Map the surrounding sequences of DVS_A ILs to unmasked DVS_B to check if their allelic regions are 
-# masked in the modified DVS reference genome
-bedtools getfasta -fi /zfs/socbd/bwu4/YU/annotation/CK2021.60.corrected.fasta \
--fo ALL_MU1.2SUP.nonDVS.chrA.SURR500.fasta -bed ALL_MU1.2SUP.nonDVS.chrA.SURR500.bed
-bedtools getfasta -fi /zfs/socbd/bwu4/YU/annotation/CK2021.60.corrected.fasta \
--fo ALL_MU2.2SUP.nonDVS.chrA.SURR500.fasta -bed ALL_MU2.2SUP.nonDVS.chrA.SURR500.bed
-minimap2 -x asm20 -t 8 CK2021.60.corrected.B.fasta ALL_MU1.2SUP.nonDVS.chrA.SURR500.fasta > MU1_chrAIL_SURR500.paf
-minimap2 -x asm20 -t 8 CK2021.60.corrected.B.fasta ALL_MU2.2SUP.nonDVS.chrA.SURR500.fasta > MU2_chrAIL_SURR500.paf
-cat MU1_chrAIL_SURR500.paf | awk '$12>0 && $4-$3 > 200 {print $6"\t"$8"\t"$9"\t"$1}' > MU1_chrAIL_SURR500_DVSB.bed
-cat MU2_chrAIL_SURR500.paf | awk '$12>0 && $4-$3 > 200 {print $6"\t"$8"\t"$9"\t"$1}' > MU2_chrAIL_SURR500_DVSB.bed
-bedtools intersect -wo -a MU1_chrAIL_SURR500_DVSB.bed -b CK2021.B.TO_MASK.bed > MU1_chrAIL_SURR500_DVSB_MASKED.intersect.txt
-bedtools intersect -wo -a MU2_chrAIL_SURR500_DVSB.bed -b CK2021.B.TO_MASK.bed > MU2_chrAIL_SURR500_DVSB_MASKED.intersect.txt
-
-samtools view -q 1 -f 66 -@ 8 BAM/SRR10150561.TE_masked.srt.bam chr9A:12773268-12773278 | grep -v Mu | \
-awk '( $4<=12773268-50 && $8+150>12773278+50) || ($8<=12773268-50 && $4+150>=12773278+50)'
-
-# Prepare reference including DVSA and the modified Mu sequences
-cdbfasta CK2021.09282021.MASKED.fasta
-grep ">" CK2021.09282021.MASKED.fasta | grep -v B | sed "s/>//g" > DVSA_MU.12022021.gi
-cat DVSA_MU.12022021.gi | cdbyank CK2021.09282021.MASKED.fasta.cidx - > DVSA_MU.12022021.fasta
-bwa index DVSA_MU.12022021.fasta
-
-for MU in MU1 MU2 ; do
-for SAMP in $( cat 1124_ALL_SAMP.list ); do
-./FETCH_SAMP_ILS.py ${MU} $SAMP
-cat ${SAMP}_${MU}_MASKED.bed | awk '$2>=1000 {print $1"\t"$2-1000"\t"$3+1000} $2<1000 {print $1"\t0\t"$3+1000}' | bedtools sort -i - > ${SAMP}_${MU}_MASK.region
-samtools view -h -@ 8 -L ${SAMP}_${MU}_MASK.region BAM/CK.TE_masked.srt.bam |  samtools fastq -1 ${SAMP}_${MU}.TMP_MASK_1.fq -2 ${SAMP}_${MU}.TMP_MASK_2.fq
-grep "@" ${SAMP}_${MU}.TMP_MASK_1.fq | sort > ${SAMP}_${MU}.TMP_MASK_1.id
-grep "@" ${SAMP}_${MU}.TMP_MASK_2.fq | sort > ${SAMP}_${MU}.TMP_MASK_2.id
-comm -1 -2 ${SAMP}_${MU}.TMP_MASK_1.id ${SAMP}_${MU}.TMP_MASK_2.id > ${SAMP}_${MU}.TMP_MASK_12.id
-sed -i 's/@//g' ${SAMP}_${MU}.TMP_MASK_12.id
-seqtk subseq ${SAMP}_${MU}.TMP_MASK_1.fq ${SAMP}_${MU}.TMP_MASK_12.id | paste - - - - | sort -k1,1 -S 3G | tr '\t' '\n' > ${SAMP}_${MU}.PAIRED.TMP_MASK_1.fq
-seqtk subseq ${SAMP}_${MU}.TMP_MASK_2.fq ${SAMP}_${MU}.TMP_MASK_12.id | paste - - - - | sort -k1,1 -S 3G | tr '\t' '\n' > ${SAMP}_${MU}.PAIRED.TMP_MASK_2.fq
-bwa mem -t 7 DVSA_MU.12022021.fasta ${SAMP}_${MU}.PAIRED.TMP_MASK_1.fq ${SAMP}_${MU}.PAIRED.TMP_MASK_2.fq | samtools sort -o ${SAMP}_${MU}.PAIRED.TMP_MASK.bam
-samtools index ${SAMP}_${MU}.PAIRED.TMP_MASK.bam
-rm -f ${SAMP}_${MU}.MASK_W_count.tsv
-for IL in $( cat ${SAMP}_${MU}_IL.txt ); do
-if [[ ${IL} == *"A"* ]]; then
-W=$( samtools view -q 1 -f 66 ${SAMP}_${MU}.PAIRED.TMP_MASK.bam $IL | grep -v Mu | \
-awk -v x=$IL '{match(x,/:([0-9]+)-([0-9]+)/,a); match($6,/([0-9]+)M/,b); match($0,/MC:Z:([0-9]+[SH])?([0-9]+)M/,c)} ( $4<=a[1]-40 && $8+c[2]>=a[2]+40) || ($8<=a[1]-40 && $4+b[1]>=a[2]+40) {print $0}' | wc -l )
-echo -e ${IL}"\t"${W} >> ${SAMP}_${MU}.MASK_W_count.tsv
-else
-echo -e ${IL}"\t0" >> ${SAMP}_${MU}.MASK_W_count.tsv
-fi
-done
-touch ${SAMP}_${MU}.MASK_W_count.tsv
-done
-done
-
-# Put all corrected ILs and the genotyeps of the 244 samples in MU1_GENOTYPE.tsv and MU2_GENOTYPE.tsv
-for MU in MU1 MU2 ; do
-for SAMP in $( cat 1124_ALL_SAMP.list ); do
-rm -f ${SAMP}_${MU}.W_count.tsv
-for IL in $( cat ${SAMP}_${MU}_IL.txt ); do
-ILEXT=$( echo $IL | awk '{match($0,/(chr[1-9AB]+):([0-9]+)-([0-9]+)$/,a); print a[1]":"a[2]-1001"-"a[3]+1000}' )
-W=$( samtools view -q 1 -f 66 BAM/${SAMP}.TE_masked.srt.bam $ILEXT | grep -v Mu | \
-awk -v x=$IL '{match(x,/:([0-9]+)-([0-9]+)/,a); match($6,/([0-9]+)M/,b); match($0,/MC:Z:([0-9]+[SH])?([0-9]+)M/,c)} 
-( $4<=a[1]-40 && $8+c[2]>=a[2]+40) || ($8<=a[1]-40 && $4+b[1]>=a[2]+40) {print $0}' | wc -l )
-echo -e ${IL}"\t"${W} >> ${SAMP}_${MU}.W_count.tsv
-done
-touch ${SAMP}_${MU}.W_count.tsv
-done
-done
-```
-
- # Content of FETCH_SAMP_ILS.py
+ ###  Content of MERGE_OLD_REST_W_COUNT.py
 
 ```python
 #!/usr/bin/env python3
@@ -983,363 +1555,89 @@ done
 import pandas as pd
 import sys
 
-MU = sys.argv[1] # Mu name
-SAMP = sys.argv[2] # Sample name in the genotype table
-GTDF = pd.read_table(f'{MU}_GENOTYPE.tsv', header=0)
-GTDF.loc[GTDF[SAMP]==1,'name'].to_csv(f'{SAMP}_{MU}_IL.txt',header=False,index=False)
-ALL_BED = pd.read_table(f'{MU}_chrAIL_SURR500_DVSB.bed',names=['chr','Left','Right','surr'])
-ID_CONVER = pd.read_table(f'{MU}_IL_ILSURROUNDING.tsv',names=['name','surr'])
-ALL_BED = ALL_BED.merge(ID_CONVER,on='surr')
-ALL_BED.loc[ALL_BED['name'].isin(GTDF.loc[GTDF[SAMP]==1,'name']),['chr','Left','Right']].to_csv(f'{SAMP}_{MU}_MASKED.bed',sep="\t",header=False,index=False)
-ALL_BED.loc[ALL_BED['name'].isin(GTDF.loc[GTDF[SAMP]==1,'name']),['surr']].to_csv(f'{SAMP}_{MU}_SURR.bed',header=False,index=False)
+SAMP=sys.argv[1]
+TE=sys.argv[2]
 
+for COUNT in ['MASK_W', 'W']:
+    old=pd.read_table(f'W_COUNT/{SAMP}_{TE}.{COUNT}_count.tsv',names=['old',f'{COUNT}_COUNT'])
+    GT0529_OLD = pd.read_table(f'{TE}.GT0529_OLDIL.tsv', names=['name','old'])
+    REST = pd.read_table(f"REST_MASK_W_COUNT/{SAMP}_{TE}_REST.{COUNT}_count.tsv",names=['name', f'{COUNT}_COUNT'])
+    OLD=old.merge(GT0529_OLD,on='old')[['name',f'{COUNT}_COUNT']]
+    pd.concat([OLD,REST],ignore_index=True).sort_values(by=['name']).to_csv(f'{SAMP}_{TE}.OLD_REST_MERGED.{COUNT}_count.tsv',header=True,index=False,sep="\t")
 ```
 
- # Merge all ${SAMP}_${MU}.W_count.tsv and ${SAMP}_${MU}.MASK_W_count.tsv
+### # NEW_Calculate_MRATIO.py
 
 ```python
 #!/usr/bin/env python3
 
 import pandas as pd
+import sys
 
-MU1_W_COUNT = pd.read_table('MU1_GENOTYPE.tsv', header=0)
-MU1_MASKW_COUNT = pd.read_table('MU1_GENOTYPE.tsv', header=0)
-SAMP = pd.read_table('1124_ALL_SAMP.list',header=None)
-for SRR in SAMP[0]:
-	MU1_W_COUNT[SRR] = 0
-	W = pd.read_table(f'{SRR}_MU1.W_count.tsv', names=['name','W_COUNT'])
-	for IL in W['name']:
-		MU1_W_COUNT.loc[MU1_W_COUNT['name']==IL,SRR] = W.loc[W['name']==IL,'W_COUNT'].to_list()[0]
-MASK = pd.read_table('MU1_chrAIL_SURR500_DVSB_MASKED.intersect.txt',header=None)[3].drop_duplicates()
-ID_CONVER = pd.read_table(f'MU1_IL_ILSURROUNDING.tsv',names=['name','surr'])
-ID_CONVER = ID_CONVER.loc[ID_CONVER['surr'].isin(MASK)]
-for SRR in SAMP[0]:
-	MU1_MASKW_COUNT[SRR] = 0
-	MASKW = pd.read_table(f'{SRR}_MU1.MASK_W_count.tsv', names=['name','W_COUNT'])
-	for IL in MASKW['name']:
-		if IL in ID_CONVER['name']:
-			MU1_MASKW_COUNT.loc[MU1_MASKW_COUNT['name']==IL,SRR] = MASKW.loc[MASKW['name']==IL,'W_COUNT'].to_list()[0]
-MU1_W_COUNT = MU1_W_COUNT.set_index(['name','DISC2IL'])
-MU1_MASKW_COUNT = MU1_MASKW_COUNT.set_index(['name','DISC2IL'])
-MU1_WMERGE_COUNT = MU1_W_COUNT + MU1_MASKW_COUNT
-MU1_WMERGE_COUNT['MASK'] = 0
-MU1_WMERGE_COUNT = MU1_WMERGE_COUNT.reset_index()
-MU1_WMERGE_COUNT.loc[MU1_WMERGE_COUNT['name'].isin(ID_CONVER['name']),'MASK'] = 1
-MU1_WMERGE_COUNT.to_csv('MU1_WMERGE_COUNT.tsv',sep="\t",index=False,header=True)
+TE=sys.argv[1]
 
-MU2_W_COUNT = pd.read_table('MU2_GENOTYPE.tsv', header=0)
-MU2_MASKW_COUNT = pd.read_table('MU2_GENOTYPE.tsv', header=0)
-SAMP = pd.read_table('1124_ALL_SAMP.list',header=None)
+MASK = pd.read_table(f'{TE}.0529IL_ALLELE_MASKED.txt',header=None)[0].drop_duplicates()
+
+M_COUNT = pd.read_table(f'ALL_SAMP.{TE}_GENOTYPE_0529.SPLIT_DISC.READ_COUNT_SUM.tsv', header=0)
+#FILT=M_COUNT['name'].tolist()
+#M_COUNT = M_COUNT.loc[M_COUNT['name'].isin(WMERGE_COUNT['name'])]
+M_COUNT_MASK = M_COUNT.loc[M_COUNT['name'].isin(MASK)].copy()
+M_COUNT_NOTMASK = M_COUNT.loc[~M_COUNT['name'].isin(MASK)].copy()
+M_COUNT_MASK.set_index(['name','DVS'], inplace=True)
+M_COUNT_NOTMASK.set_index(['name','DVS'], inplace=True)
+
+W_COUNT = pd.read_table(f'GENOTYPE/{TE}_0529_GENOTYPE.tsv', header=0)
+MASKW_COUNT = pd.read_table(f'GENOTYPE/{TE}_0529_GENOTYPE.tsv', header=0)
+SAMP = pd.read_table('ALL0510.txt', header=None)
 
 for SRR in SAMP[0]:
-	MU2_W_COUNT[SRR] = 0
-	W = pd.read_table(f'{SRR}_MU2.W_count.tsv', names=['name','W_COUNT'])
-	for IL in W['name']:
-		MU2_W_COUNT.loc[MU2_W_COUNT['name']==IL,SRR] = W.loc[W['name']==IL,'W_COUNT'].to_list()[0]
-
-MASK = pd.read_table('MU2_chrAIL_SURR500_DVSB_MASKED.intersect.txt',header=None)[3].drop_duplicates()
-ID_CONVER = pd.read_table(f'MU2_IL_ILSURROUNDING.tsv',names=['name','surr'])
-ID_CONVER = ID_CONVER.loc[ID_CONVER['surr'].isin(MASK)]
+    W_COUNT[SRR] = 0
+    W = pd.read_table(f'0529_W_count/{SRR}_{TE}.OLD_REST_MERGED.W_count.tsv', header=0)
+    for IL in W['name']:
+        if IL in W_COUNT['name'].values:
+            W_COUNT.loc[W_COUNT['name']==IL,SRR] = W.loc[W['name']==IL,'W_COUNT'].to_list()[0]
 
 for SRR in SAMP[0]:
-	MU2_MASKW_COUNT[SRR] = 0
-	MASKW = pd.read_table(f'{SRR}_MU2.MASK_W_count.tsv', names=['name','W_COUNT'])
-	for IL in MASKW['name']:
-		if IL in ID_CONVER['name']:
-			MU2_MASKW_COUNT.loc[MU2_MASKW_COUNT['name']==IL,SRR] = MASKW.loc[MASKW['name']==IL,'W_COUNT'].to_list()[0]
+    MASKW_COUNT[SRR] = 0
+    MASKW = pd.read_table(f'0529_W_count/{SRR}_{TE}.OLD_REST_MERGED.MASK_W_count.tsv', header=0)
+    for IL in MASKW['name']:
+        if IL in MASKW_COUNT['name'].values:
+            MASKW_COUNT.loc[MASKW_COUNT['name']==IL,SRR] = MASKW.loc[MASKW['name']==IL,'MASK_W_COUNT'].to_list()[0]
 
-MU2_W_COUNT = MU2_W_COUNT.set_index(['name','DISC2IL'])
-MU2_MASKW_COUNT = MU2_MASKW_COUNT.set_index(['name','DISC2IL'])
-MU2_WMERGE_COUNT = MU2_W_COUNT + MU2_MASKW_COUNT
-MU2_WMERGE_COUNT['MASK'] = 0
-MU2_WMERGE_COUNT = MU2_WMERGE_COUNT.reset_index()
-MU2_WMERGE_COUNT.loc[MU2_WMERGE_COUNT['name'].isin(ID_CONVER['name']),'MASK'] = 1
-MU2_WMERGE_COUNT.to_csv('MU2_WMERGE_COUNT.tsv',sep="\t",index=False,header=True)
+W_COUNT = W_COUNT.set_index(['name','DVS'])
+MASKW_COUNT = MASKW_COUNT.set_index(['name','DVS'])
+WMERGE_COUNT = W_COUNT + MASKW_COUNT
+WMERGE_COUNT.to_csv(f'{TE}_0529_MERGED_W_READ_COUNT.tsv', sep="\t", header=True, index=True)
+WMERGE_COUNT = WMERGE_COUNT.reset_index()
+WMERGE_COUNT_MASK = WMERGE_COUNT.loc[WMERGE_COUNT['name'].isin(MASK)].copy()
+WMERGE_COUNT_NOTMASK = WMERGE_COUNT.loc[~WMERGE_COUNT['name'].isin(MASK)].copy()
+WMERGE_COUNT_MASK.set_index(['name','DVS'], inplace=True)
+WMERGE_COUNT_NOTMASK.set_index(['name','DVS'], inplace=True)
+
+NOTMASK_MRATIO = M_COUNT_NOTMASK/2/(M_COUNT_NOTMASK/2+WMERGE_COUNT_NOTMASK+0.001)
+NOTMASK_MRATIO = NOTMASK_MRATIO.mask(NOTMASK_MRATIO>1,1)
+NOTMASK_MRATIO.reset_index(inplace=True)
+MASK_MRATIO = M_COUNT_MASK/(M_COUNT_MASK/2+WMERGE_COUNT_MASK+0.001)
+MASK_MRATIO = MASK_MRATIO.mask(MASK_MRATIO>1,1)
+MASK_MRATIO.reset_index(inplace=True)
+
+pd.concat([NOTMASK_MRATIO, MASK_MRATIO], ignore_index=True).to_csv(f'{TE}_0529_FILT_MRATIO.tsv', sep="\t", header=True, index=False)
 ```
 
-# Check all the ILs in all samples
+[Group IL count analysis](https://www.notion.so/Group-IL-count-analysis-c9f79f8da4ba415881fb4a9df92d3038?pvs=21)
+
+[K-Mer Statistics](https://www.notion.so/K-Mer-Statistics-27c830f91108474dab9a9ffa60d63e71?pvs=21)
+
+### # Filter un-intact DVS TEs and nested TE ILs
 
 ```bash
-for SAMP in $( cat 1124_ALL_SAMP.list ); do
-echo ${SAMP} > MU1/${SAMP}.MU1.SPLIT_COUNT.txt
-echo ${SAMP} > MU2/${SAMP}.MU2.SPLIT_COUNT.txt
-echo ${SAMP} > MU1/${SAMP}.MU1.DISC_COUNT.txt
-echo ${SAMP} > MU2/${SAMP}.MU2.DISC_COUNT.txt
-	bedtools intersect -wa -c -a ALL_MU1.2SUP.bed -b MU1/${SAMP}.MU1.SPLIT_SUP.bed | \
-cut -f 4 >> MU1/${SAMP}.MU1.SPLIT_COUNT.txt
-	bedtools intersect -wa -c -a ALL_MU2.2SUP.bed -b MU2/${SAMP}.MU2.SPLIT_SUP.bed | \
-cut -f 4 >> MU2/${SAMP}.MU2.SPLIT_COUNT.txt
-	bedtools intersect -wa -c -a ALL_MU1.2SUP.bed -b MU1/${SAMP}.MU1.DISC_SUP.bed | \
-cut -f 4 >> MU1/${SAMP}.MU1.DISC_COUNT.txt
-	bedtools intersect -wa -c -a ALL_MU2.2SUP.bed -b MU2/${SAMP}.MU2.DISC_SUP.bed | \
-cut -f 4 >> MU2/${SAMP}.MU2.DISC_COUNT.txt
-done
-
-cp ALL_MU1.DISC2IL_marked.tsv TEMP1
-for SAMP in $( cat 1124_ALL_SAMP.list ); do
-paste TEMP1 MU1/${SAMP}.MU1.SPLIT_COUNT.txt > TEMP2
-mv TEMP2 TEMP1
-done
-mv TEMP1 ALL_MU1.DISC2IL_marked.244.SPLIT_COUNT.tsv
-
-cp ALL_MU1.DISC2IL_marked.tsv TEMP1
-for SAMP in $( cat 1124_ALL_SAMP.list ); do
-paste TEMP1 MU1/${SAMP}.MU1.DISC_COUNT.txt > TEMP2
-mv TEMP2 TEMP1
-done
-mv TEMP1 ALL_MU1.DISC2IL_marked.244.DISC_COUNT.tsv
-
-cp ALL_MU2.DISC2IL_marked.tsv TEMP1
-for SAMP in $( cat 1124_ALL_SAMP.list ); do
-paste TEMP1 MU2/${SAMP}.MU2.SPLIT_COUNT.txt > TEMP2
-mv TEMP2 TEMP1
-done
-mv TEMP1 ALL_MU2.DISC2IL_marked.244.SPLIT_COUNT.tsv
-
-cp ALL_MU2.DISC2IL_marked.tsv TEMP1
-for SAMP in $( cat 1124_ALL_SAMP.list ); do
-paste TEMP1 MU2/${SAMP}.MU2.DISC_COUNT.txt > TEMP2
-mv TEMP2 TEMP1
-done
-mv TEMP1 ALL_MU2.DISC2IL_marked.244.DISC_COUNT.tsv
-
-```
-
-## MULE activity in RNAseq data
-
-### **#prepare the reference for RNAseq analysis**
-
-```bash
-cut -f 1,2,3 /zfs/socbd/bwu4/YU/annotation/FOUR_TE/TE_IN_CITRUS_GENOMES/CORRECTED_DVS_4TE.bed > CORRECTED_DVS_MULE.raw.bed
-
-#>Manually add the 5 non-intact MULE regions in CORRECTED_DVS_4TE.1-3.bed
-
-bedtools sort -i CORRECTED_DVS_MULE.raw.bed > CORRECTED_DVS_MULE.bed 
-
-# Output all genic regions overlapping with any MULEs
-bedtools intersect -wo -a CORRECTED_DVS_MULE.bed -b CK2021.FINAL0403.masked.gff3 | awk '$6=="gene" {print $4"\t"$7"\t"$8}' > MU_OVERLAP_GENE.bed
-# Mask MULE overlapping genic regions in gff3 and the preivously masked genome for RNAseq analysis
-bedtools intersect -v -a CK2021.FINAL0403.masked.gff3 -b MU_OVERLAP_GENE.bed > DVS.20211128.MASKED.gff3
-bedtools maskfasta -fi CK2021.FINAL0403.masked.fasta -bed CORRECTED_DVS_MULE.bed -fo DVS.20211128.MASKED.fasta
-
-# Get the modified representative MULE sequences
-infoseq -only -name /zfs/socbd/bwu4/YU/annotation/FOUR_TE/09212021_NEW/CK2021.09282021.MASKED.fasta | grep Mu > Mu.id.txt
-cdbfasta /zfs/socbd/bwu4/YU/annotation/FOUR_TE/09212021_NEW/CK2021.09282021.MASKED.fasta
-cat Mu.id.txt | cdbyank /zfs/socbd/bwu4/YU/annotation/FOUR_TE/09212021_NEW/CK2021.09282021.MASKED.fasta.cidx - > Modified_Mu.fasta
-bedtools maskfasta -fi CK2021.FINAL0403.masked.fasta -bed CORRECTED_DVS_MULE.bed -fo DVS.20211128.MASKED.fasta
-cat Modified_Mu.fasta >> DVS.20211128.MASKED.fasta
-
-# Index the reference for HISAT2
-gffread -E DVS.20211128.MASKED.gff3 -T > DVS.20211128.MASKED.gtf
-extract_splice_sites.py DVS.20211128.MASKED.gtf > DVS.20211128.MASKED.ss
-extract_exons.py DVS.20211128.MASKED.gtf > DVS.20211128.MASKED.exon
-hisat2-build --ss *.ss --exon *.exon DVS.20211128.MASKED.fasta DVS.20211128.MASKED
-
-# move all files to /zfs/socbd/bwu4/MULE/RNAseq/REF
-mv * /zfs/socbd/bwu4/MULE/RNAseq/REF
-```
-
-### #mapping RNAseq data to the modified reference genome
-
-```bash
-cd /scratch1/bwu4/SWO_RNASEQ/SAM
-hisat2 -p 40 --dta -x /zfs/socbd/bwu4/MULE/RNAseq/REF/DVS.20211128.MASKED \
--1 ../SRR12096786_1.clean.fastq -2 ../SRR12096786_2.clean.fastq -S SRR12096786_DVS.20211128.MASKED.sam
-samtools sort -@ 8 -o SRR12096786_DVS.20211128.MASKED.srt.bam SRR12096786_DVS.20211128.MASKED.sam 
-samtools index -@ 8 SRR12096786_DVS.20211128.MASKED.srt.bam
-
-hisat2 -p 40 --dta -x /zfs/socbd/bwu4/MULE/RNAseq/REF/DVS.20211128.MASKED \
--1 ../SRR12096786_1.clean.fastq -2 ../SRR12096786_2.clean.fastq -S SRR12096786_DVS.20211128.MASKED.sam
-samtools sort -@ 8 -o SRR12096786_DVS.20211128.MASKED.srt.bam SRR12096786_DVS.20211128.MASKED.sam 
-samtools index -@ 8 SRR12096786_DVS.20211128.MASKED.srt.bam
-
-###### TEMPLATE.PBS ######
-#PBS -N TEMP
-#PBS -l select=1:ncpus=8:mem=30gb:interconnect=1g,walltime=24:00:00
-#PBS -j oe
-#PBS -o TEMP.HISAT2.log
-
-source ~/.bashrc
-cd /scratch1/bwu4/SWO_RNASEQ/SAM
-hisat2 -p 8 --dta -x /zfs/socbd/bwu4/MULE/RNAseq/REF/DVS.20211128.MASKED \
--1 ../TEMP_1.clean.fastq -2 ../TEMP_2.clean.fastq -S TEMP_DVS.20211128.MASKED.sam
-
-###### TEMPLATE.PBS ends here ######
-
-mkdir /scratch1/bwu4/SWO_RNASEQ/PBS && cd /scratch1/bwu4/SWO_RNASEQ/PBS
-for SRR in $( cat ../SWO_RNASEQ.SRR | head -n 740 ); do
-sed "s/TEMP/${SRR}/g" TEMPLATE.PBS > ${SRR}.pbs
-done
-
-array=(SRR8186430 SRR12096786)
-for SRR in $( cat ../SWO_RNASEQ.SRR | head -n 740 ); do
-if [[ ! " ${array[*]} " =~ ${SRR} ]]; then 
-N=$( qstat -u bwu4 | grep RR | wc -l)
-while [ $N -ge 100 ]; do
-sleep 60
-N=$( qstat -u bwu4 | grep RR | wc -l)
-done
-qsub ${SRR}.pbs
-fi
-done
-
-###### SORTBAM.PBS ######
-#PBS -N TEMP
-#PBS -l select=1:ncpus=2:mem=30gb:interconnect=1g,walltime=24:00:00
-#PBS -j oe
-#PBS -o TEMP.SORTBAM.log
-
-source ~/.bashrc
-cd /scratch1/bwu4/SWO_RNASEQ/BAM
-samtools sort -o TEMP_DVS.20211128.MASKED.srt.bam ../SAM/TEMP_DVS.20211128.MASKED.sam 
-samtools index TEMP_DVS.20211128.MASKED.srt.bam
-###### SORTBAM.PBS ends here ######
-
-for SRR in $( cat ../SWO_RNASEQ.SRR | head -n 740 ); do
-sed "s/TEMP/${SRR}/g" SORTBAM.PBS > ../PBS/${SRR}.SORTBAM.pbs
-done
-
-for SRR in $( cat ../SWO_RNASEQ.SRR | head -n 740 ); do
-if [[ ! ${SRR} == "SRR12096786" ]]; then 
-N=$( qstat -u bwu4 | grep RR | wc -l)
-while [ $N -ge 100 ]; do
-sleep 60
-N=$( qstat -u bwu4 | grep RR | wc -l)
-done
-qsub ${SRR}.SORTBAM.pbs
-fi
+for TE in TE{1..32} ; do 
+awk 'NR==1 {print $0} $2!~/\|/ && $1~/chr/ {print $0}' ${TE}_0606_GENOTYPE.tsv > ${TE}_0606_GENOTYPE_UNINTACT_FILT.tsv
 done
 ```
 
-### Calculate FPM of Mu1 and Mu2 for all the samples
+[IL-based phylogeny](https://www.notion.so/IL-based-phylogeny-cd5996a7754742c6afe1d14c868c44ae?pvs=21)
 
-```bash
-# Output the IDs of read pairs overlapping with Mu1 and Mu2
-for SAMP in $( cat 1124_ALL_SAMP.list ); do
-samtools view -F 268 BAM/${SAMP}.TE_masked.srt.bam | awk '$3~/Mu1/ {print $1}' | sort -u > BAM/${SAMP}.Mu1.readid
-samtools view -q 1 -F 268 BAM/${SAMP}.TE_masked.srt.bam | awk '$3~/Mu2/ {print $1}' | sort -u > BAM/${SAMP}.Mu2.readid
-done
+[Scanning ILs in CCS of two Valencia](https://www.notion.so/Scanning-ILs-in-CCS-of-two-Valencia-189dd355e56c47dc87549815002e0d19?pvs=21)
 
-for SAMP in $( tail -n 241 1124_ALL_SAMP.list ); do samtools stat -@ 28 BAM/${SAMP}.TE_masked.srt.bam > BAM/${SAMP}.BAM_stat.report ; done
-
-for SAMP in $( cat 1124_ALL_SAMP.list ); do
-# The deleted region : Mu2_1:3234-4981 , only reads with primary alignment overlapping with Mu2_1:(3234+50)-(4981-50) were counted
-samtools view -F 268 BAM/${SAMP}.TE_masked.srt.bam Mu2_1:3284-4931 | cut -f 1 | sort -u > BAM/${SAMP}.Mu2_DEL.readid
-done
-
-for SAMP in $( cat 1124_ALL_SAMP.list ); do
-# COUNT is the number of read pairs (segments) overlapping with Mu2
-COUNT=$( wc -l BAM/${SAMP}.Mu2.readid | cut -d " " -f 1)
-# DEL is the number of read pairs (segments) overlapping with the deleted Mu2_1:3234-4981 region in DVS_Mu2_2
-DEL=$( wc -l BAM/${SAMP}.Mu2_DEL.readid | cut -d " " -f 1 )
-# MAPPED is the total number of mapped read pairs of ${SAMP} 
-MAPPED=$( grep "reads mapped:" BAM/${SAMP}.BAM_stat.report | awk '{print $4/2}' )
-echo -e "${SAMP}\t${COUNT}\t${DEL}\t${MAPPED}" >> DNA244_Mu2.readpair_count.tsv
-done
-
-for SAMP in $( cat 1124_ALL_SAMP.list ); do
-# COUNT is the number of read pairs (segments) overlapping with Mu2
-COUNT=$( wc -l BAM/${SAMP}.Mu1.readid | cut -d " " -f 1)
-# MAPPED is the total number of mapped read pairs of ${SAMP} 
-MAPPED=$( grep "reads mapped:" BAM/${SAMP}.BAM_stat.report | awk '{print $4/2}' )
-echo -e "${SAMP}\t${COUNT}\t${MAPPED}" >> DNA244_Mu1.readpair_count.tsv
-done
-
-```
-
-### **Calculate FPM of Mu2 in 740 sweet orange RNAseq data**
-
-```bash
-awk '$3~/rRNA/ {print $1"\t"$4-1"\t"$5}' /zfs/socbd/bwu4/YU/annotation/CK.03022021.rfam_infernal.gff3 > DVS.rRNA.bed
-
-for SAMP in $( head -n 740 SWO_RNASEQ.SRR ); do
-samtools view -F 256 BAM/${SAMP}_DVS.20211128.MASKED.srt.bam Mu2_1 | grep chr > ${SAMP}.Mu2_chr.SAM
-COUNT=$( samtools view -F 256 BAM/${SAMP}_DVS.20211128.MASKED.srt.bam Mu2_1 | cut -f 1 | sort -u | wc -l )
-TOTAL=$( awk '$0~/reads;/ {match($0,/^([0-9]+) reads/,a); print a[1]}' PBS/${SAMP}.HISAT2.log )
-MAPPED=$( awk '$0~/overall/ {match($0,/^([0-9\.]+)%/,a); print a[1]}' PBS/${SAMP}.HISAT2.log )
-echo -e "${SAMP}\t${COUNT}\t${TOTAL}\t${MAPPED}" >> RNA740_Mu2.count.tsv
-done
-for SAMP in $( head -n 740 SWO_RNASEQ.SRR ); do
-rRNA_COUNT=$( samtools view -@ 20 -F 256 -L DVS.rRNA.bed BAM/${SAMP}_DVS.20211128.MASKED.srt.bam | cut -f 1 | sort -u | wc -l )
-echo -e "${SAMP}\t${rRNA_COUNT}" >> RNA740_Mu2.rRNA_count.tsv
-done
-
-cd /scratch1/bwu4/MANDARIN_RNASEQ_12272021
-for BAM in *.bam ; do echo ${BAM%_DVS.20211128.MASKED.srt.bam} >> ../MAN_RNASEQ39.SRR ; done
-for SAMP in $( cat MAN_RNASEQ39.SRR ); do
-samtools view -F 256 BAM/${SAMP}_DVS.20211128.MASKED.srt.bam Mu2_1 | grep chr > ${SAMP}.Mu2_chr.SAM
-COUNT=$( samtools view -F 256 BAM/${SAMP}_DVS.20211128.MASKED.srt.bam Mu2_1 | cut -f 1 | sort -u | wc -l )
-TOTAL=$( awk '$0~/reads;/ {match($0,/^([0-9]+) reads/,a); print a[1]}' PBS/${SAMP}.HISAT2.log )
-MAPPED=$( awk '$0~/overall/ {match($0,/^([0-9\.]+)%/,a); print a[1]}' PBS/${SAMP}.HISAT2.log )
-echo -e "${SAMP}\t${COUNT}\t${TOTAL}\t${MAPPED}" >> MAN_RNA39_Mu2.count.tsv
-done
-for SAMP in $( cat MAN_RNASEQ39.SRR ); do
-rRNA_COUNT=$( samtools view -@ 20 -F 256 -L DVS.rRNA.bed BAM/${SAMP}_DVS.20211128.MASKED.srt.bam | cut -f 1 | sort -u | wc -l )
-echo -e "${SAMP}\t${rRNA_COUNT}" >> MAN_RNA39.rRNA_count.tsv
-done
-
-cd /scratch1/bwu4/PUMMELO_RNASEQ_12272021/BAM
-for BAM in *.bam ; do echo ${BAM%_DVS.20211128.MASKED.srt.bam} >> ../PUM_RNASEQ171.SRR ; done
-cd ..
-for SAMP in $( cat PUM_RNASEQ171.SRR ); do
-samtools view -F 256 BAM/${SAMP}_DVS.20211128.MASKED.srt.bam Mu2_1 | grep chr > ${SAMP}.Mu2_chr.SAM
-COUNT=$( samtools view -F 256 BAM/${SAMP}_DVS.20211128.MASKED.srt.bam Mu2_1 | cut -f 1 | sort -u | wc -l )
-TOTAL=$( awk '$0~/reads;/ {match($0,/^([0-9]+) reads/,a); print a[1]}' PBS/${SAMP}.HISAT2.log )
-MAPPED=$( awk '$0~/overall/ {match($0,/^([0-9\.]+)%/,a); print a[1]}' PBS/${SAMP}.HISAT2.log )
-echo -e "${SAMP}\t${COUNT}\t${TOTAL}\t${MAPPED}" >> PUM_RNA171_Mu2.count.tsv
-done
-for SAMP in $( cat PUM_RNASEQ171.SRR ); do
-rRNA_COUNT=$( samtools view -@ 20 -F 256 -L DVS.rRNA.bed BAM/${SAMP}_DVS.20211128.MASKED.srt.bam | cut -f 1 | sort -u | wc -l )
-echo -e "${SAMP}\t${rRNA_COUNT}" >> PUM_RNA171.rRNA_count.tsv
-done
-
-```
-
-### Get read count for analyzed genes
-
-```bash
-
-for SAMP in $( head -n 740 SWO_RNASEQ.SRR ); do
-COUNT=()
-for i in {1..60}; do
-input=($( sed -n ${i}p gene.list ))
-COUNT=(echo -e ${COUNT}"\t"$( samtools view -q 1 BAM/${SAMP}_DVS.20211128.MASKED.srt.bam ${input[1]} | cut -f 1 | sort -u | wc -l ))
-done
-echo -e "${SAMP}\t${COUNT}" >> RNA740_GENES.count.tsv
-
-for SAMP in $( head -n 740 SWO_RNASEQ.SRR ); do
-rRNA_COUNT=$( samtools view -@ 20 -F 256 -L DVS.rRNA.bed BAM/${SAMP}_DVS.20211128.MASKED.srt.bam | cut -f 1 | sort -u | wc -l )
-echo -e "${SAMP}\t${rRNA_COUNT}" >> RNA740_Mu2.rRNA_count.tsv
-done
-
-for SAMP in $( head -n 740 SWO_RNASEQ.SRR ); do 
- COUNT=() 
-for i in {1..60}; do
- input=($( sed -n ${i}p gene.list )) 
- COUNT=$(echo -e ${COUNT}"\t"$( samtools view -@ 10 -q 1 BAM/${SAMP}_DVS.20211128.MASKED.srt.bam ${input[1]} | cut -f 1 | sort -u | wc -l )) 
-done 
- echo -e "${SAMP}\t${COUNT}" >> RNA740_GENES.count.tsv 
-done
-
-for SAMP in $( head -n 740 SWO_RNASEQ.SRR ); do 
- COUNT=$( samtools view -@ 10 -q 1 BAM/${SAMP}_DVS.20211128.MASKED.srt.bam chr6B:24509960-24518502 | cut -f 1 | sort -u | wc -l ) 
- echo -e "${SAMP}\t${COUNT}" >> RNA740_DSWO6B02241.count.tsv 
-done
-
-```
-
-### Output 3’ downstream terminal of transcribed MU2 mem
-
-```bash
-MU2_IL.bed
-for SAMP in $( head -n 740 SWO_RNASEQ.SRR ); do
-awk '$4>6500 {print $7"\t"$8-1"\t"$8}' SWO740_MU2_CHR/${SAMP}.Mu2_chr.SAM  | bedtools sort -i - | bedtools intersect -c -a MU2_IL.bed -b - > MU2_CHR_${SAMP}.COUNT.bed
-done
-
-cut -f 1,2,3,4 MU2_CHR_SRR8186430.COUNT.bed > TEMP
-for SAMP in $( head -n 740 SWO_RNASEQ.SRR ); do
-cut -f 5 MU2_CHR_${SAMP}.COUNT.bed | paste TEMP - > TEMP1
-mv TEMP1 TEMP
-done
-mv TEMP SWO740_MU2_CHR.COUNT.bed
-```
+[Transposon in evolution](https://www.notion.so/Transposon-in-evolution-9a18176c0ae64d9bbdd8b2ad4377bf00?pvs=21)
