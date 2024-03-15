@@ -1,4 +1,4 @@
-# Detection of active transposable elements (TE) and TE insertion locus (IL) identification
+# Detection of active transposable elements (TE) and TE insertion locus (IL) scanning
 
 ## Software requirements
     Python3.* (version>=3.7; tested on 3.9 and 3.10)
