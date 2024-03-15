@@ -1,16 +1,16 @@
 # Detection of active transposable elements (TE) and TE insertion locus (IL) scanning
 
 ## Software requirements
-Python3.* (version>=3.7; tested on 3.9 and 3.10)
-gawk (tested on GNU Awk 5.1.0)
-cd-hit (version=4.8.1; only used for active TE family detection)
-samtools (version>=1.12; tested on v1.15, v1.17, and v1.18)
-bcftools (version>=1.12; tested on v1.15, v1.17, and v1.18)
-blast (version>=2.14; tested on v2.14)
-pandas (tested on v1.5.2)
-bwa (tested on version=0.7.17)
-emboss (tested on version=6.6.0)
-minimap2 (version>=2.17; tested on v2.17 and v2.26)
+ Python3.* (version>=3.7; tested on 3.9 and 3.10)
+ gawk (tested on GNU Awk 5.1.0)
+ cd-hit (version=4.8.1; only used for active TE family detection)
+ samtools (version>=1.12; tested on v1.15, v1.17, and v1.18)
+ bcftools (version>=1.12; tested on v1.15, v1.17, and v1.18)
+ blast (version>=2.14; tested on v2.14)
+ pandas (tested on v1.5.2)
+ bwa (tested on version=0.7.17)
+ emboss (tested on version=6.6.0)
+ minimap2 (version>=2.17; tested on v2.17 and v2.26)
     
 ## One-step software installation
 ```bash
