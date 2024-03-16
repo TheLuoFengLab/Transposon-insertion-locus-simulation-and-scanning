@@ -62,7 +62,11 @@ GCA_019143665.1.fasta GCA_018104345.1.fasta GCA_018105775.1.fasta T78.asem.fasta
 done
 ```
 
-### 1.3 
+### 1.3 Deduplicate variants detected in assemblies
+```
+awk '$1=="V"' *.var.txt | sort -k2,2 -k3,3n ALL10.var > ALL10.sorted.var
+python merge_deduplicate_variants.py ALL10.sorted.var > ALL10.deduplicated_variants.txt
+```
 
 for BED in *.INDEL.bed; do
 echo $BED
