@@ -1,5 +1,5 @@
 # Detection of active TE families in sweet orange
-1.1 Download sweet orange assemblies
+###1.1 Download sweet orange assemblies
 Assemblies information:
 |Acession name	| Description	| NCBI accession No. |
 | ------------- | ----------- | ------------------ |
@@ -43,7 +43,7 @@ cat assemblies/GCA_022201045.1.fasta assemblies/GCA_022201065.1.fasta > assembli
 ```
 
 
-1.2 Align 10 SWO assemblies to DVS and call large indels
+###1.2 Align 10 SWO assemblies to DVS and call large indels
 ```bash
 cd assemblies
 for FAS in GCA_019144245.1.fasta GCA_019144225.1.fasta GCA_019144195.1.fasta GCA_019144185.1.fasta GCA_019144155.1.fasta \
@@ -58,7 +58,7 @@ GCA_019143665.1.fasta GCA_018104345.1.fasta GCA_018105775.1.fasta T78.asem.fasta
 done
 ```
 
-1.3 
+###1.3 
 
 for BED in *.INDEL.bed; do
 echo $BED
