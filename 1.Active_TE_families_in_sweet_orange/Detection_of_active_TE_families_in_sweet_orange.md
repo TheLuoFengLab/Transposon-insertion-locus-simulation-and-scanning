@@ -79,8 +79,9 @@ mv TEMP1 TEMP
 echo -e "CHR\tSTART\tEND\t"$( ls ALL10.*.INDEL.bed ) | sed "s/ /\t/g" > header.txt
 
 cat header.txt TEMP > ALL10.INDEL.tsv
-# Remove duplicate indels with both ends with distances <= 15 bp in excel
-# Name all INDELs in excel and paste the deletions in ALL10.INS.bed
+
+Name all INDELs in excel and paste the deletions in ALL10.INS.bed
+
 sed -i 's/INDEL/DEL/g' ALL10.DEL.bed
 bedtools getfasta -fi CK2021.60.corrected.fasta -bed ALL10.DEL.bed -fo ALL10.DEL.fasta
 
