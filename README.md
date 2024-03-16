@@ -27,7 +27,7 @@ conda create --name TESCAN --file Transposon-insertion-locus-simulation-and-scan
 conda activate TESCAN
 ```
 ## 1. Identification of active TE in SWO assemblies
-[Detailed intructions.](1.Active_TE_families_in_sweet_orange/Detection_of_active_TE_families_in_sweet_orange.md)
+[Detailed intructions in 1.Active_TE_families_in_sweet_orange/Detection_of_active_TE_families_in_sweet_orange.md.](1.Active_TE_families_in_sweet_orange/Detection_of_active_TE_families_in_sweet_orange.md)
 
 
 
