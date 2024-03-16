@@ -1,8 +1,9 @@
 # Detection of active TE families in sweet orange
 1.1 Download sweet orange assemblies from NCBI
 Downloaded assemblies:
-Acession name	Description	NCBI accession No.
-DVS	Valencia sweet orange from Florida	GCA_022201045.1 (DVS_A), GCA_022201065.1 (DVS_B)
+|Acession name	| Description	| NCBI accession No. |
+| ------------- | ----------- | ------------------ |
+| DVS	| Valencia sweet orange from Florida | GCA_022201045.1 (DVS_A), GCA_022201065.1 (DVS_B) |
 T19	Irradiated Valencia sweet orange mutant T19	SRR15706502
 T78	Irradiated Valencia sweet orange mutant T78	SRR15706505
 HSO	Di-haploid Valencia sweet orange	GCA_018105775.1
