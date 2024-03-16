@@ -26,15 +26,13 @@ conda create --name TESCAN --file Transposon-insertion-locus-simulation-and-scan
 # Activate conda environment
 conda activate TESCAN
 ```
-# Active TE in SWO assemblies
+## 1. Active TE in SWO assemblies
 
-Mapping 10 SWO assemblies to DVS and call variants
-
-/zfs/socbd/bwu4/YU/annotation/FOUR_TE/TE_IN_CITRUS_GENOMES/SWO
+1.1 Mapping 10 SWO assemblies to DVS and call variants
 
 ```bash
 for FAS in GCA_019144245.1.fasta GCA_019144225.1.fasta GCA_019144195.1.fasta GCA_019144185.1.fasta GCA_019144155.1.fasta GCA_019143665.1.fasta GCA_018104345.1.fasta Csiv4.fasta T78.asem.fasta SF.asem.fasta ; do
-minimap2 -cx asm5 -t8 --cs CK2021.60.corrected.fasta $FAS > asm.paf  # keeping this file is recommended; --cs required!
+minimap2 -cx asm5 -t8 --cs CK2021.60.corrected.fasta $FAS > asm.paf  
 sort -k6,6 -k8,8n asm.paf > asm.srt.paf             # sort by reference start coordinate
 k8 paftools.js call asm.srt.paf > ${FAS}.var.txt
 done
