@@ -30,12 +30,12 @@ for ACC in GCA_022201045.1 GCA_022201065.1 GCA_018105775.1 GCA_018104345.1 GCA_0
 done
 ```
 Download T19 and T78 diploid assemblies
-'''bash
+```bash
 wget --no-check-certificate -O T78.asem.fasta.gz  https://figshare.com/ndownloader/files/45090274 && gzip -d T78.asem.fasta.gz
 mv T78.asem.fasta assemblies/
 wget --no-check-certificate -O T19.asem.fasta.gz  https://figshare.com/ndownloader/files/45090271 && gzip -d T19.asem.fasta.gz
 mv T19.asem.fasta assemblies/
-'''
+```
 
 Concatenate DVS_A and DVS_B as into diploid DVS assembly
 ```bash
