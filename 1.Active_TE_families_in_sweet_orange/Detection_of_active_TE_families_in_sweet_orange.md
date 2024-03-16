@@ -1,6 +1,6 @@
 # Detection of active TE families in sweet orange
-1.1 Download sweet orange assemblies from NCBI
-Downloaded assemblies:
+1.1 Download sweet orange assemblies
+Assemblies information:
 |Acession name	| Description	| NCBI accession No. |
 | ------------- | ----------- | ------------------ |
 | DVS	| Valencia sweet orange from Florida | GCA_022201045.1 (DVS_A), GCA_022201065.1 (DVS_B) |
@@ -15,6 +15,7 @@ Downloaded assemblies:
 | UKXC	| a local sweet orange variety from Hunan province |	GCA_019144245.1
 | BT2	| Bingtangcheng No.2	| GCA_019144225.1
 
+Download assemblies from NCBI:
 ```bash
 # Make sure no useful ncbi_dataset.zip and ncbi_dataset/ are present in current working dir
 # The download assemblies are saved in ./assemblies
@@ -28,27 +29,38 @@ for ACC in GCA_022201045.1 GCA_022201065.1 GCA_018105775.1 GCA_018104345.1 GCA_0
     fi
 done
 ```
-# Concatenate DVS_A and DVS_B as into diploid DVS assembly
-cat assemblies/GCA_022201045.1.fasta assemblies/GCA_022201065.1.fasta > assemblies/DVS.fasta
+Download T19 and T78 diploid assemblies
+'''
+wget --no-check-certificate -O T78.asem.fasta.gz  https://figshare.com/ndownloader/files/45090274 && gzip -d T78.asem.fasta.gz
+mv T78.asem.fasta assemblies/
+wget --no-check-certificate -O T19.asem.fasta.gz  https://figshare.com/ndownloader/files/45090271 && gzip -d T19.asem.fasta.gz
+mv T19.asem.fasta assemblies/
+'''
 
-# Download T19 and T78 diploid assemblies
+Concatenate DVS_A and DVS_B as into diploid DVS assembly
+```
+cat assemblies/GCA_022201045.1.fasta assemblies/GCA_022201065.1.fasta > assemblies/DVS.fasta
+```
+
 
 1.2 Align 10 SWO assemblies to DVS and call large indels
 ```bash
-for FAS in GCA_019144245.1.fasta GCA_019144225.1.fasta GCA_019144195.1.fasta GCA_019144185.1.fasta GCA_019144155.1.fasta GCA_019143665.1.fasta GCA_018104345.1.fasta Csiv4.fasta T78.asem.fasta SF.asem.fasta ; do
-minimap2 -cx asm5 -t8 --cs CK2021.60.corrected.fasta $FAS > asm.paf  
-sort -k6,6 -k8,8n asm.paf > asm.srt.paf             # sort by reference start coordinate
-k8 paftools.js call asm.srt.paf > ${FAS}.var.txt
+cd assemblies
+for FAS in GCA_019144245.1.fasta GCA_019144225.1.fasta GCA_019144195.1.fasta GCA_019144185.1.fasta GCA_019144155.1.fasta \
+GCA_019143665.1.fasta GCA_018104345.1.fasta GCA_018105775.1.fasta T78.asem.fasta SF.asem.fasta ; do
+  rm -f asm.paf asm.srt.paf
+  minimap2 -cx asm5 -t8 --cs DVS.fasta $FAS > asm.paf  
+  sort -k6,6 -k8,8n asm.paf > asm.srt.paf             # sort by reference start coordinate
+  k8 paftools.js call asm.srt.paf > ${FAS}.var.txt
+  awk '$5==1 && $4-$3>50 && $4-$3<20000 && $11-$10<=10 {print $2"\t"$3"\t"$4}' ${FAS}.var.txt > ${FAS%.fasta}.DEL.tsv
+  awk '$5==1 && $4-$3<=10 && $11-$10>50 && $11-$10<20000 {print $2"\t"$3"\t"$4}' ${FAS}.var.txt > ${FAS%.fasta}.INS.tsv
+  cat ${FAS%.fasta}.DEL.tsv ${FAS%.fasta}.INS.tsv > ${FAS%.fasta}.INDEL.bed
 done
+```
 
-for VAR in *.fasta.var.txt ; do
-awk '$5==1 && $4-$3>50 && $4-$3<20000 && $11-$10<=10 {print $2"\t"$3"\t"$4}' $VAR > ${VAR%.fasta.var.txt}.DEL.tsv
-awk '$5==1 && $4-$3<=10 && $11-$10>50 && $11-$10<20000 {print $2"\t"$3"\t"$4}' $VAR > ${VAR%.fasta.var.txt}.INS.tsv
+1.3 
 
-cat ${VAR%.fasta.var.txt}.DEL.tsv ${VAR%.fasta.var.txt}.INS.tsv > ${VAR%.fasta.var.txt}.INDEL.bed
-done
-
-for BED in Csiv4.INDEL.bed T78.asem.INDEL.bed SF.asem.INDEL.bed GCA_019144245.1.INDEL.bed GCA_019144225.1.INDEL.bed GCA_019144195.1.INDEL.bed GCA_019144185.1.INDEL.bed GCA_019144155.1.INDEL.bed GCA_019143665.1.INDEL.bed GCA_018104345.1.INDEL.bed; do
+for BED in *.INDEL.bed; do
 echo $BED
 bedtools intersect -f 0.95 -F 0.95 -c -a ALL10.INDEL.bed -b $BED > ALL10.${BED}
 done
