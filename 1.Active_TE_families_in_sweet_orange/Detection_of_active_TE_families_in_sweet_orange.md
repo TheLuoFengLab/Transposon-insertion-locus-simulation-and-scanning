@@ -52,10 +52,9 @@ THREADS=40 # Set number of cpu cores used for minimap2 mapping
 cd assemblies
 for FAS in GCA_019144245.1.fasta GCA_019144225.1.fasta GCA_019144195.1.fasta GCA_019144185.1.fasta GCA_019144155.1.fasta \
 GCA_019143665.1.fasta GCA_018104345.1.fasta GCA_018105775.1.fasta T78.asem.fasta T19.asem.fasta ; do
-  rm -f asm.paf asm.srt.paf
-  minimap2 -cx asm5 -t ${THREADS} --cs DVS.fasta $FAS > asm.paf  
-  sort -k6,6 -k8,8n asm.paf > asm.srt.paf             # sort by reference start coordinate
-  k8 paftools.js call asm.srt.paf > ${FAS}.var.txt
+  minimap2 -cx asm5 -t ${THREADS} --cs DVS.fasta $FAS > ${FAS}.paf  
+  sort -k6,6 -k8,8n ${FAS}.paf > ${FAS}.srt.paf             # sort by reference start coordinate
+  k8 $(which paftools.js) call ${FAS}.srt.paf > ${FAS}.var.txt
   awk '$5==1 && $4-$3>50 && $4-$3<20000 && $11-$10<=10 {print $2"\t"$3"\t"$4}' ${FAS}.var.txt > ${FAS%.fasta}.DEL.tsv
   awk '$5==1 && $4-$3<=10 && $11-$10>50 && $11-$10<20000 {print $2"\t"$3"\t"$4}' ${FAS}.var.txt > ${FAS%.fasta}.INS.tsv
   cat ${FAS%.fasta}.DEL.tsv ${FAS%.fasta}.INS.tsv > ${FAS%.fasta}.INDEL.bed
