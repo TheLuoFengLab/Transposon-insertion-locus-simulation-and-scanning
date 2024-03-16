@@ -27,7 +27,7 @@ conda create --name TESCAN --file Transposon-insertion-locus-simulation-and-scan
 conda activate TESCAN
 ```
 ## 1. Active TE in SWO assemblies
-
+See 
 1.1 Mapping 10 SWO assemblies to DVS and call variants
 
 ```bash
@@ -75,43 +75,6 @@ awk '$0~/>Cluster/ {print a"\t"b"\t"c"\t"e; a=$0;b=0;c=0} $0!~/>Cluster/ {b+=1; 
 
 ```
 
-#Sniffles2 protocol failed
-
-```bash
-for FAS in GCA_019144245.1.fasta GCA_019144225.1.fasta GCA_019144195.1.fasta GCA_019144185.1.fasta GCA_019144155.1.fasta GCA_019143665.1.fasta GCA_018104345.1.fasta Csiv4.fasta ; do
-minimap2 -t 20 -ax asm10 CK2021.60.corrected.fasta $FAS | samtools sort -o ${FAS%.fasta}.srt.bam
-sniffles --input ${FAS%.fasta}.srt.bam --snf ${FAS%.fasta}.snf
-done
-
-sniffles --minsupport 1 --minsvlen 100 --long-ins-length 20000 --combine-output-filtered --allow-overwrite --combine-null-min-coverage 1 --combine-low-confidence 0 --combine-low-confidence-abs 1 --input SF.snf T78.snf GCA_019144245.1.snf GCA_019144225.1.snf GCA_019144195.1.snf GCA_019144185.1.snf GCA_019144155.1.snf GCA_019143665.1.snf GCA_018104345.1.snf Csiv4.snf --vcf 04142022_allgenomes_4kb.vcf
-
-sniffles --minsupport 1 --minsvlen 4000 --long-ins-length 20000 --combine-output-filtered --allow-overwrite --combine-null-min-coverage 1 --combine-low-confidence 0 --combine-low-confidence-abs 1 --input SF.snf T78.snf GCA_019144245.1.snf GCA_019144225.1.snf GCA_019144195.1.snf GCA_019144185.1.snf GCA_019144155.1.snf GCA_019143665.1.snf GCA_018104345.1.snf Csiv4.snf --vcf 04142022_allgenomes_4kb.vcf
-
-sniffles --minsupport 1 --minsvlen 50 --long-ins-length 20000 --combine-output-filtered --allow-overwrite --combine-null-min-coverage 1 --combine-low-confidence 0 --combine-low-confidence-abs 1 --input SF.snf T78.snf GCA_019144245.1.snf GCA_019144225.1.snf GCA_019144195.1.snf GCA_019144185.1.snf GCA_019144155.1.snf GCA_019143665.1.snf GCA_018104345.1.snf Csiv4.snf --vcf 04142022_allgenomes_50.vcf
-
-grep ":0:1:Sniffles2" 04142022_allgenomes_50.vcf | grep INS | grep -v IMPRECISE | \
-	awk '{print ">"$3"\t"$5}' | sed "s/\t/\n/g" > 04152022_allgenomes.INS.fasta
-
-grep ":0:1:Sniffles2" 04142022_allgenomes_50.vcf | grep DEL | grep -v IMPRECISE | awk '{match($8,/END=([^;]+);/,a); print $1"\t"$2"\t"a[1]"\t"$3 }' > 04152022_allgenomes.DEL.bed
-
-bedtools getfasta -nameOnly -fi CK2021.60.corrected.fasta -bed 04152022_allgenomes.DEL.bed -fo 04152022_allgenomes.DEL.fasta
-
-cat 04152022_allgenomes.INS.fasta 04152022_allgenomes.DEL.fasta > 04152022_allgenomes.INDEL.fasta
-
-#Filter indels <=50 bp and >=50000 bp
-bioawk -c fastx '{ if(length($seq)>50 && length($seq)<50000 ) { print ">"$name; print $seq }}' 04152022_allgenomes.INDEL.fasta > 04152022_allgenomes.INDEL.50_50kb.fasta
-sed -i 's/Sniffles2.//g' 04152022_allgenomes.INDEL.50_50kb.fasta # Delete Sniffles2. from the sequence names
-
-#Clustering with 95% identity and 90% alignment coverage of the long sequence
-cd-hit-est -r 1 -g 1 -c 0.95 -i 04152022_allgenomes.INDEL.50_50kb.fasta -o 04152022_allgenomes.INDEL.95_90.clusters.fasta -T 0 -aL 0.90 -M 370000 -d 50 -n 10
-
-#Clustering with 95% identity and 90% alignment coverage of the long sequence
-cd-hit-est -r 1 -g 1 -c 0.80 -i 04152022_allgenomes.INDEL.50_50kb.fasta -o 04152022_allgenomes.INDEL.80_50.clusters.fasta -T 0 -aL 0.50 -M 370000 -d 50 -n 10
-
-awk '$0~/>Cluster/ {print a"\t"b"\t"c"\t"e; a=$0;b=0;c=0} $0!~/>Cluster/ {b+=1; if ($0~/*/) {match($0,/([0-9]+)nt, >(.+)\.\.\./,d);c=d[2];e=d[1]}} END {print a"\t"b"\t"c"\t"e}' 04152022_allgenomes.INDEL.95_90.clusters.fasta.clstr | sed "s/ //g" > 04152022_allgenomes.INDEL.95_90.clusters.stat.tsv
-
-awk '$0~/>Cluster/ {print a"\t"b"\t"c"\t"e; a=$0;b=0;c=0} $0!~/>Cluster/ {b+=1; if ($0~/*/) {match($0,/([0-9]+)nt, >(.+)\.\.\./,d);c=d[2];e=d[1]}} END {print a"\t"b"\t"c"\t"e}' 04152022_allgenomes.INDEL.80_50.clusters.fasta.clstr | sed "s/ //g" > 04152022_allgenomes.INDEL.80_50.clusters.stat.tsv
-```
 
 #Maually curate all TE member terminal haplotypes from 32 different families and output all of them as NEW*_LEFT/RIGHT_50bp.align.fasta
 
