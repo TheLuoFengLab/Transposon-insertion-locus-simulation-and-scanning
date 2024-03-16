@@ -1,5 +1,5 @@
 # Detection of active TE families in sweet orange
-###1.1 Download sweet orange assemblies
+### 1.1 Download sweet orange assemblies
 Assemblies information:
 |Acession name	| Description	| NCBI accession No. |
 | ------------- | ----------- | ------------------ |
@@ -20,7 +20,8 @@ Download assemblies from NCBI:
 # Make sure no useful ncbi_dataset.zip and ncbi_dataset/ are present in current working dir
 # The download assemblies are saved in ./assemblies
 mkdir assemblies
-for ACC in GCA_022201045.1 GCA_022201065.1 GCA_018105775.1 GCA_018104345.1 GCA_019144195.1 GCA_019144185.1 GCA_019143665.1 GCA_019144155.1 GCA_019144245.1 GCA_019144225.1 ; do
+for ACC in GCA_022201045.1 GCA_022201065.1 GCA_018105775.1 GCA_018104345.1 GCA_019144195.1 GCA_019144185.1 \
+GCA_019143665.1 GCA_019144155.1 GCA_019144245.1 GCA_019144225.1 ; do
   rm -Rf ncbi_dataset ncbi_dataset.zip
     if [[ ! -a assemblies/${ACC}.fasta ]]; then
     datasets download genome accession ${ACC} --include genome
@@ -31,9 +32,12 @@ done
 ```
 Download T19 and T78 diploid assemblies
 ```bash
-wget --no-check-certificate -O T78.asem.fasta.gz  https://figshare.com/ndownloader/files/45090274 && gzip -d T78.asem.fasta.gz
+wget --no-check-certificate -O T78.asem.fasta.gz  https://figshare.com/ndownloader/files/45090274
+gzip -d T78.asem.fasta.gz
 mv T78.asem.fasta assemblies/
-wget --no-check-certificate -O T19.asem.fasta.gz  https://figshare.com/ndownloader/files/45090271 && gzip -d T19.asem.fasta.gz
+
+wget --no-check-certificate -O T19.asem.fasta.gz  https://figshare.com/ndownloader/files/45090271
+gzip -d T19.asem.fasta.gz
 mv T19.asem.fasta assemblies/
 ```
 
@@ -42,14 +46,14 @@ Concatenate DVS_A and DVS_B as into diploid DVS assembly
 cat assemblies/GCA_022201045.1.fasta assemblies/GCA_022201065.1.fasta > assemblies/DVS.fasta
 ```
 
-
-###1.2 Align 10 SWO assemblies to DVS and call large indels
+### 1.2 Align 10 SWO assemblies to DVS and call large indels
 ```bash
+THREADS=40 # Set number of cpu cores used for minimap2 mapping
 cd assemblies
 for FAS in GCA_019144245.1.fasta GCA_019144225.1.fasta GCA_019144195.1.fasta GCA_019144185.1.fasta GCA_019144155.1.fasta \
 GCA_019143665.1.fasta GCA_018104345.1.fasta GCA_018105775.1.fasta T78.asem.fasta SF.asem.fasta ; do
   rm -f asm.paf asm.srt.paf
-  minimap2 -cx asm5 -t8 --cs DVS.fasta $FAS > asm.paf  
+  minimap2 -cx asm5 -t ${THREADS} --cs DVS.fasta $FAS > asm.paf  
   sort -k6,6 -k8,8n asm.paf > asm.srt.paf             # sort by reference start coordinate
   k8 paftools.js call asm.srt.paf > ${FAS}.var.txt
   awk '$5==1 && $4-$3>50 && $4-$3<20000 && $11-$10<=10 {print $2"\t"$3"\t"$4}' ${FAS}.var.txt > ${FAS%.fasta}.DEL.tsv
@@ -58,7 +62,7 @@ GCA_019143665.1.fasta GCA_018104345.1.fasta GCA_018105775.1.fasta T78.asem.fasta
 done
 ```
 
-###1.3 
+### 1.3 
 
 for BED in *.INDEL.bed; do
 echo $BED
