@@ -4,16 +4,16 @@ Downloaded assemblies:
 |Acession name	| Description	| NCBI accession No. |
 | ------------- | ----------- | ------------------ |
 | DVS	| Valencia sweet orange from Florida | GCA_022201045.1 (DVS_A), GCA_022201065.1 (DVS_B) |
-T19	Irradiated Valencia sweet orange mutant T19	SRR15706502
-T78	Irradiated Valencia sweet orange mutant T78	SRR15706505
-HSO	Di-haploid Valencia sweet orange	GCA_018105775.1
-VAL	Valencia sweet orange	GCA_018104345.1
-NHE	Newhall navel orange	GCA_019144195.1
-NW	Lanlate: a late maturing mutant of navel orange	GCA_019144185.1
-SO3	Valencia sweet orange	GCA_019143665.1
-TCPS1	a high acid orange from Hunan Province in South China	GCA_019144155.1
-UKXC	a local sweet orange variety from Hunan province	GCA_019144245.1
-BT2	Bingtangcheng No.2	GCA_019144225.1
+| T19	| Irradiated Valencia sweet orange mutant T19	| SRR15706502
+| T78	| Irradiated Valencia sweet orange mutant T78	| SRR15706505
+| HSO	| Di-haploid Valencia sweet orange	| GCA_018105775.1
+| VAL	| Valencia sweet orange	| GCA_018104345.1
+| NHE	| Newhall navel orange	| GCA_019144195.1
+| NW	| Lanlate: a late maturing mutant of navel orange	| GCA_019144185.1
+| SO3	| Valencia sweet orange	| GCA_019143665.1
+| TCPS1	| a high acid orange from Hunan Province in South China	| GCA_019144155.1
+| UKXC	| a local sweet orange variety from Hunan province |	GCA_019144245.1
+| BT2	| Bingtangcheng No.2	| GCA_019144225.1
 
 ```bash
 for ACC in GCA_019144245.1 GCA_019144225.1 GCA_019144195.1 GCA_019144185.1 GCA_019144155.1 GCA_019143665.1 GCA_018104345.1 GCA_022201045.1 GCA_022201065.1 
