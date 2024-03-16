@@ -26,9 +26,8 @@ conda create --name TESCAN --file Transposon-insertion-locus-simulation-and-scan
 # Activate conda environment
 conda activate TESCAN
 ```
-## 1. Active TE in SWO assemblies
-See 
-1.1 Mapping 10 SWO assemblies to DVS and call variants
+## 1. Identification of active TE in SWO assemblies
+See Active TE families in sweet orange/Detection of active TE families in sweet orange.md
 
 ```bash
 for FAS in GCA_019144245.1.fasta GCA_019144225.1.fasta GCA_019144195.1.fasta GCA_019144185.1.fasta GCA_019144155.1.fasta GCA_019143665.1.fasta GCA_018104345.1.fasta Csiv4.fasta T78.asem.fasta SF.asem.fasta ; do
