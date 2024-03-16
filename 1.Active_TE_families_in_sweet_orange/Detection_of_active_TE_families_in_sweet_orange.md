@@ -16,9 +16,19 @@ Downloaded assemblies:
 | BT2	| Bingtangcheng No.2	| GCA_019144225.1
 
 ```bash
-for ACC in GCA_019144245.1 GCA_019144225.1 GCA_019144195.1 GCA_019144185.1 GCA_019144155.1 GCA_019143665.1 GCA_018104345.1 GCA_022201045.1 GCA_022201065.1 
-
+# NCBI datasets downloaded file name is ncbi_dataset.zip by default. Make sure no ncbi_dataset.zip and ncbi_dataset/ are present in current working dir
+mkdir assemblies
+for ACC in GCA_022201045.1 GCA_022201065.1 GCA_018105775.1 GCA_018104345.1 GCA_019144195.1 GCA_019144185.1 GCA_019143665.1 GCA_019144155.1 GCA_019144245.1 GCA_019144225.1 ; do
+  rm -Rf ncbi_dataset ncbi_dataset.zip
+    if [[ ! -a assemblies/${ACC}.fasta ]]; then
+    datasets download genome accession ${ACC} --include genome
+    unzip -o ncbi_dataset.zip
+    mv ncbi_dataset/data/${ACC}/${ACC}*.fna assemblies/${ACC}.fasta
+    fi
+done
 ```
+# Concatenate DVS_A and DVS_B as into diploid DVS assembly
+cat assemblies/GCA_022201045.1.fasta assemblies/GCA_022201065.1.fasta > assemblies/DVS.fasta
 
 1.2 Align 10 SWO assemblies to DVS and call large indels
 ```bash
