@@ -51,7 +51,7 @@ cat assemblies/GCA_022201045.1.fasta assemblies/GCA_022201065.1.fasta > assembli
 THREADS=40 # Set number of cpu cores used for minimap2 mapping
 cd assemblies
 for FAS in GCA_019144245.1.fasta GCA_019144225.1.fasta GCA_019144195.1.fasta GCA_019144185.1.fasta GCA_019144155.1.fasta \
-GCA_019143665.1.fasta GCA_018104345.1.fasta GCA_018105775.1.fasta T78.asem.fasta SF.asem.fasta ; do
+GCA_019143665.1.fasta GCA_018104345.1.fasta GCA_018105775.1.fasta T78.asem.fasta T19.asem.fasta ; do
   rm -f asm.paf asm.srt.paf
   minimap2 -cx asm5 -t ${THREADS} --cs DVS.fasta $FAS > asm.paf  
   sort -k6,6 -k8,8n asm.paf > asm.srt.paf             # sort by reference start coordinate
