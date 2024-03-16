@@ -27,57 +27,9 @@ conda create --name TESCAN --file Transposon-insertion-locus-simulation-and-scan
 conda activate TESCAN
 ```
 ## 1. Identification of active TE in SWO assemblies
-[Detailed intructions.](./"1. Active TE families in sweet orange"/"Detection of active TE families in sweet orange.md")
-
-```bash
-for FAS in GCA_019144245.1.fasta GCA_019144225.1.fasta GCA_019144195.1.fasta GCA_019144185.1.fasta GCA_019144155.1.fasta GCA_019143665.1.fasta GCA_018104345.1.fasta Csiv4.fasta T78.asem.fasta SF.asem.fasta ; do
-minimap2 -cx asm5 -t8 --cs CK2021.60.corrected.fasta $FAS > asm.paf  
-sort -k6,6 -k8,8n asm.paf > asm.srt.paf             # sort by reference start coordinate
-k8 paftools.js call asm.srt.paf > ${FAS}.var.txt
-done
-
-for VAR in *.fasta.var.txt ; do
-awk '$5==1 && $4-$3>50 && $4-$3<20000 && $11-$10<=10 {print $2"\t"$3"\t"$4}' $VAR > ${VAR%.fasta.var.txt}.DEL.tsv
-awk '$5==1 && $4-$3<=10 && $11-$10>50 && $11-$10<20000 {print $2"\t"$3"\t"$4}' $VAR > ${VAR%.fasta.var.txt}.INS.tsv
-
-cat ${VAR%.fasta.var.txt}.DEL.tsv ${VAR%.fasta.var.txt}.INS.tsv > ${VAR%.fasta.var.txt}.INDEL.bed
-done
-
-for BED in Csiv4.INDEL.bed T78.asem.INDEL.bed SF.asem.INDEL.bed GCA_019144245.1.INDEL.bed GCA_019144225.1.INDEL.bed GCA_019144195.1.INDEL.bed GCA_019144185.1.INDEL.bed GCA_019144155.1.INDEL.bed GCA_019143665.1.INDEL.bed GCA_018104345.1.INDEL.bed; do
-echo $BED
-bedtools intersect -f 0.95 -F 0.95 -c -a ALL10.INDEL.bed -b $BED > ALL10.${BED}
-done
-
-for BED in ALL10.*.INDEL.bed ; do cut -f 4 $BED | paste TEMP - > TEMP1 ; mv TEMP1 TEMP; done
-
-paste ALL10.INDEL.bed TEMP | sed "s/\t\t/\t/g" > TEMP1
-mv TEMP1 TEMP
-echo -e "CHR\tSTART\tEND\t"$( ls ALL10.*.INDEL.bed ) | sed "s/ /\t/g" > header.txt
-
-cat header.txt TEMP > ALL10.INDEL.tsv
-# Remove duplicate indels with both ends with distances <= 15 bp in excel
-# Name all INDELs in excel and paste the deletions in ALL10.INS.bed
-sed -i 's/INDEL/DEL/g' ALL10.DEL.bed
-bedtools getfasta -fi CK2021.60.corrected.fasta -bed ALL10.DEL.bed -fo ALL10.DEL.fasta
-
-awk '$4-$3<=10 && $5==1 && $11-$10>=50' *.var.txt | sort -u -k1,3 | awk '{print ">"$2":"$3"-"$4"\t"$8}' | sed "s/\t/\n/g" > INS.fasta
-
-cat DEL.gi | cdbyank INS.fasta.cidx > ALL10.INS.fasta
-
-cat ALL10.INS.fasta ALL10.DEL.fasta > ALL10.INDEL.fasta
-
-cd-hit-est -r 1 -g 1 -c 0.80 -i ALL10.INDEL.fasta -o ALL10.INDEL.80_50.clusters.fasta -T 0 -aL 0.50 -M 370000 -d 50 -n 10
-awk '$0~/>Cluster/ {print a"\t"b"\t"c"\t"e; a=$0;b=0;c=0} $0!~/>Cluster/ {b+=1; if ($0~/*/) {match($0,/([0-9]+)nt, >(.+)\.\.\./,d);c=d[2];e=d[1]}} END {print a"\t"b"\t"c"\t"e}' ALL10.INDEL.80_50.clusters.fasta.clstr | sed "s/ //g" > ALL10.INDEL.80_50.clusters.stat.tsv
-
-cd-hit-est -r 1 -g 1 -c 0.95 -i ALL10.INDEL.fasta -o ALL10.INDEL.95_90.clusters.fasta -T 0 -aL 0.90 -M 370000 -d 50 -n 10
-awk '$0~/>Cluster/ {print a"\t"b"\t"c"\t"e; a=$0;b=0;c=0} $0!~/>Cluster/ {b+=1; if ($0~/*/) {match($0,/([0-9]+)nt, >(.+)\.\.\./,d);c=d[2];e=d[1]}} END {print a"\t"b"\t"c"\t"e}' ALL10.INDEL.95_90.clusters.fasta.clstr | sed "s/ //g" > ALL10.INDEL.95_90.clusters.stat.tsv
-
-```
+[Detailed intructions.](1.Active_TE_families_in_sweet_orange/Detection_of_active_TE_families_in_sweet_orange.md)
 
 
-#Maually curate all TE member terminal haplotypes from 32 different families and output all of them as NEW*_LEFT/RIGHT_50bp.align.fasta
-
-#Python script for summarizing terminal haplotypes d:\SWO\SWO_TE\TERMINAL_HAP.py
 
 ```python
 #!/usr/bin/env python3
