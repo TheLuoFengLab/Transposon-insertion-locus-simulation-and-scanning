@@ -215,7 +215,7 @@ if [[ (! -f "$STEP4_DONE") ]]; then
     
     awk -v x=$DEPTH 'BEGIN {OFS="\t"} NR==1 {print $0} $5!~/Ancestral/ && $5!~/Unintact/ && $9=="Yes" && ($6+$7+$8)<2.5*x' $STEP4_REPORT > ${OUT_PREFIX}.temp.tsv
     
-    python3 ${SCRIPT_DIR}/id_conversion.py ${OUT_PREFIX}.temp.tsv IL_CONVERSION.tsv ${OUT_PREFIX}.SWOTE_FINAL.tsv
+    python3 ${SCRIPT_DIR}/id_conversion.py ${OUT_PREFIX}.temp.tsv ${SCRIPT_DIR}/IL_CONVERSION.tsv ${OUT_PREFIX}.SWOTE_FINAL.tsv
 
     touch "$STEP4_DONE"
 
