@@ -84,9 +84,7 @@ DVS5A   36494523        36494563        CiGYPSY5        Novel   1       1       
 | **TypeA**      | Split-mapped read count (max 1 per read pair)                                               |
 | **TypeB**      | Discordant read pair count                                                                   |
 | **TypeC**      | Concordant read pairs supporting wild-type                                                   |
-| **PASS_FILTER**| Passed if:
-1. `TypeA > 0` and `TypeA + TypeB ≥ 2`
-2. `TypeA + TypeB + TypeC < 2.5× sequencing depth` |
+| **PASS_FILTER**| Passed if: 1. `TypeA > 0` and `TypeA + TypeB ≥ 2` 2. `TypeA + TypeB + TypeC < 2.5× sequencing depth` |
 
 ---
 
