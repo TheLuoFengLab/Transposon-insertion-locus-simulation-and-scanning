@@ -1,0 +1,13 @@
+name: te_detection
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.10
+  - bwa=0.7.17
+  - samtools=1.17
+  - bedtools=2.30.0
+  - pysam=0.21.0
+  - pandas=2.0.3  # Required for report merging [3,5](@ref)
+  - parallel=20231122  # GNU Parallel for chunk processing [3](@ref)
+  - pip
