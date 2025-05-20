@@ -1,0 +1,66 @@
+### Comprehensive transposon insertion profiling unravels the asexual breeding history of sweet orange cultivars ###
+### Main procedures for constructing SNV-based phylogenetic tree for sweet orange ###
+### Step 1. Read cleaning and mapping to the DVS reference genome for each of the sweet orange accession
+
+# ${SAMPLE} is iterated across all the 127 sweet orange accessions
+
+# (1) NGS fastq cleaning using fastp v0.24.1
+fastp -w 12 -i ${SAMPLE}_1.fastq -I ${SAMPLE}_2.fastq -o ${SAMPLE}.clean_1.fastq.gz -O ${SAMPLE}.clean_2.fastq.gz
+
+# (2) Indexing the reference genome using bwa v0.7.19-r1273
+# DVS.fasta is obtained through merging DVSA1.0 (GCA_022201045.1) and DVSB1.0 (GCA_022201065.1)
+bwa index DVS.fasta  
+
+# (3) Mapping reads to DVS.fasta using bwa
+bwa mem -t 10 DVS.fasta ${SAMPLE}.clean_1.fastq.gz ${SAMPLE}.clean_2.fastq.gz |\
+    samtools sort -@ 2 -o ${SAMPLE}.srt.bam
+
+# (4) Analyzing good-coverage genomic regions (>=0.5-fold and <=1.5-fold average sequencing depth) using NGS of DVS 
+samtools view -@6 -F256 -h BAM/CK.srt.bam | samtools depth -@ 6 - > CK.depth
+
+cut -f 3 CK.depth | awk '$1<50' | sort -n | uniq -c # The results show that the peak coverage is at 16
+
+awk '$3>=8 && $3<=24' CK.depth | awk '{print $1"\t"$2-1"\t"$2}' | bedtools merge -i - > CK.goodcov.bed
+
+### Step 2. Calling potentiall fixed somatic SNVs
+# (1) Calling gvcf for each sample
+bcftools mpileup --threads 12 -a FORMAT/AD,FORMAT/DP -f DVS.fasta ${SAMPLE}.srt.bam --output-type u |\
+    bcftools call --threads 12 -m -Oz -o ${SAMPLE}.gvl.vcf.gz - bcftools index --threads 12 \
+	-t ${SAMPLE}.gvl.vcf.gz 
+
+mkdir GVCF && mv *.gvl.vcf.gz GVCF/	
+
+# (2) Calling homozygous SNVs (potentially fixed somatic mutations) for each sample
+mkdir hom_for_merge_vcf
+
+bcftools view --threads 12 -i 'GT="1/1" && N_ALT==1 && FORMAT/AD[0:1] >= 4 && (FORMAT/AD[0:1]/FORMAT/DP) > 0.80' \
+    GVCF/${SAMPLE}.gvl.vcf.gz -Oz -o hom_for_merge_vcf/${SAMPLE}.hom_for_merge.vcf.gz 
+
+bcftools index --threads 12 -t hom_for_merge_vcf/${SAMPLE}.hom_for_merge.vcf.gz
+
+ls -1 hom_for_merge_vcf/*.hom_for_merge.vcf.gz > VCF_LIST_FOR_MERGE.txt
+
+# (3) Merging and filtering potential fixed somatic SNVs
+mkdir MERGE_DIR
+
+bcftools merge --threads 12 --force-samples -Oz -o MERGE_DIR/merged.candidates.vcf.gz $(cat VCF_LIST_FOR_MERGE.txt)
+
+bcftools view --threads 12 -m2 -M2 -v snps MERGE_DIR/merged.candidates.vcf.gz -Oz -o MERGE_DIR/merged.snvs.vcf.gz
+
+# '-d exact' removes duplicate records based on POS, REF, ALT
+bcftools norm --threads 12 -d exact -f DVS.fasta MERGE_DIR/merged.snvs.vcf.gz -Oz -o MERGE_DIR/deduplicated.snvs.vcf.gz
+
+bcftools index --threads 12 -t MERGE_DIR/deduplicated.snvs.vcf.gz
+
+bcftools view -Oz -o MERGE_DIR/final.goodcov.sites.vcf.gz -R CK.goodcov.bed MERGE_DIR/deduplicated.snvs.vcf.gz
+
+### Step 3. Output genotypes on the fixed somatic SNVs for each sample
+mkdir GENOTYPES
+
+# Using custom script to output the genotypes 
+scripts/genotype_single_sample.py MERGE_DIR/final.goodcov.sites.vcf.gz GVCF/${SAMPLE}.gvl.subset.vcf.gz ${SAMPLE}.srt.bam \
+	> GENOTYPES/${SAMPLE}.tsv
+
+### Step 4. Merge genotypes, convertign to .phy format and Maximum-likelihood phylogenetic tree construction
+# Using custom bash and python script
+scripts/genotype_phylo.sh MERGE_DIR/final.goodcov.sites.vcf.gz GENOTYPES/ phy0519_0.05_0.10 0.05 0.10 
