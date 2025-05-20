@@ -1,5 +1,10 @@
 ### Comprehensive transposon insertion profiling unravels the asexual breeding history of sweet orange cultivars ###
 ### Main procedures for constructing SNV-based phylogenetic tree for sweet orange ###
+
+### Optional: creating software environment for going through the entire process
+conda env create -f environment.yml -n new_env_name
+conda activate new_env_name
+
 ### Step 1. Read cleaning and mapping to the DVS reference genome for each of the sweet orange accession
 
 # ${SAMPLE} is iterated across all the 127 sweet orange accessions
