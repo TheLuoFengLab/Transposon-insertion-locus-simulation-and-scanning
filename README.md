@@ -34,6 +34,7 @@ mv DVS.masked.34TE.fasta SWOIL/REF/
 
 ### Command-Line Help  
 ```bash
+conda activate te_detection
 ./IL_SCAN.sh -h
 ```
 Output:
