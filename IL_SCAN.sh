@@ -199,15 +199,12 @@ if [[ (! -f "$STEP4_DONE") ]]; then
         python3 ${SCRIPT_DIR}/merge_reports.py \
             -i "${OUT_PREFIX}_secondpass"/secondpass_*.tsv \
             -o "$STEP4_REPORT"
-
-        touch "$STEP4_DONE"
     else
         # Single chunk processing
         python3 ${SCRIPT_DIR}/second_pass.py \
             -m $MERGED_BED \
             -b "${OUT_PREFIX}_dedup.bam" \
-            -o "$STEP4_REPORT" \
-            ${BED_FILE:+--bed "$BED_FILE"}
+            -o "$STEP4_REPORT
     fi
     
     samtools depth -@ $THREADS $STEP1_UNMASK_BAM > ${OUT_PREFIX}.depth
