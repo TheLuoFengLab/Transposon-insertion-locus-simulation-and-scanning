@@ -92,7 +92,7 @@ if [[ (! -f "$STEP1_DONE") || (! -f "${OUT_PREFIX}.split_reads.txt") || (! -f "$
         bwa mem -T 20 -Y -t 12 $UNMASK_REF $READ1 $READ2 | samtools sort -@ 4 -o $STEP1_UNMASK_BAM
     fi
 
-    samtools view -@ $THREADS -F 0x900 -d "SA" DVS.unmasked_pos_srt.bam | cut -f 1 | sort -u > ${OUT_PREFIX}.split_reads.txt
+    samtools view -@ $THREADS -F 0x900 -d "SA" ${STEP1_UNMASK_BAM} | cut -f 1 | sort -u > ${OUT_PREFIX}.split_reads.txt
     
     # Index reference if needed
     if [[ ! -f "${REFERENCE}.bwt" ]]; then
