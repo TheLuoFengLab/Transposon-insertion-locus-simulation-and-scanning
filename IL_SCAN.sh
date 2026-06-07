@@ -203,8 +203,8 @@ if [[ (! -f "$STEP4_DONE") ]]; then
         # Single chunk processing
         python3 ${SCRIPT_DIR}/second_pass.py \
             -m $MERGED_BED \
-            -b "${OUT_PREFIX}_dedup.bam" \
-            -o "$STEP4_REPORT
+            -b "${NAME_SORTED_BAM}" \
+            -o "$STEP4_REPORT"
     fi
     
     samtools depth -@ $THREADS $STEP1_UNMASK_BAM > ${OUT_PREFIX}.depth
