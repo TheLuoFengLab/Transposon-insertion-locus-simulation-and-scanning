@@ -199,7 +199,7 @@ class SecondPassProcessor:
                     if read.reference_name == nonte_chrom:
                         # Update unpacking here too
                         for il_start, il_end, il_type in self.il_index.get(nonte_chrom, {}).get(te_family, []):
-                            if abs(read.reference_start - (il_start + il_end)/2) < 1000:
+                            if (il_start - 1000) < read.reference_start and (il_end + 1000) > read.reference_start:
                                 key = (nonte_chrom, il_start, il_end, te_family)
                                 if key not in counted_ils:
                                     self.counts[key]['B'] += 1
